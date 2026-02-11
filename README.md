@@ -12,17 +12,17 @@ AgentOS 用户认证 SDK，提供登录、刷新 Token、登出等功能。
 
 ## 接口规范
 
-网关前缀由 SDK 固定处理为 `/liteAgent`，开发者只需要配置纯服务器地址，例如：
+网关前缀由 SDK 固定处理为 `/liteAgent`，开发者只需要配置纯服务器地址，例如（示例地址）：
 
 ```text
-https://liteagent-gray.liteagent.cn
+https://your-server.example.com
 ```
 
-最终请求路径形如：
+最终请求路径形如（以示例地址为例）：
 
-- 登录：`POST https://host:port/liteAgent/v1/agentOS/login`
-- 刷新：`POST https://host:port/liteAgent/v1/agentOS/refreshToken`
-- 登出：`POST https://host:port/liteAgent/v1/agentOS/logout`
+- 登录：`POST https://your-server.example.com/liteAgent/v1/agentOS/login`
+- 刷新：`POST https://your-server.example.com/liteAgent/v1/agentOS/refreshToken`
+- 登出：`POST https://your-server.example.com/liteAgent/v1/agentOS/logout`
 
 ### 登录
 
@@ -36,7 +36,7 @@ https://liteagent-gray.liteagent.cn
 {
   "code": 200,
   "message": "请求成功",
-  "data": "token字符串"
+  "data": "<token 字符串>"
 }
 ```
 
@@ -86,7 +86,8 @@ dart pub get
 import 'package:agentos_auth/agentos_auth.dart';
 
 void main() async {
-  const serverAddress = 'https://liteagent-gray.liteagent.cn';
+  // 示例服务器地址（实际项目中请替换为你自己的后端地址）
+  const serverAddress = 'https://your-server.example.com';
 
   // 默认使用 DefaultTokenStorage，Token 会保存到 ~/.agentos/auth/token.json
   final client = AuthClient();
