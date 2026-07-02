@@ -1,14 +1,12 @@
-// AgentOS 用户认证 SDK
+// AgentOS OAuth2 认证 SDK
 
-// 模型
+export 'src/models/auth_session.dart';
 export 'src/models/token.dart';
-
-// 存储
 export 'src/utils/token_storage.dart';
-
-// HTTP 客户端
 export 'src/utils/api_client.dart';
-
-// 认证客户端与 DTO
 export 'src/client/auth/auth_client.dart';
-export 'src/client/auth/dto.dart';
+export 'src/oauth/oauth_config.dart';
+export 'src/oauth/oauth_redirect_handler.dart';
+export 'src/oauth/oauth_redirect_transport.dart';
+export 'src/oauth/oauth_session.dart';
+export 'src/oauth/loopback_redirect_server.dart';

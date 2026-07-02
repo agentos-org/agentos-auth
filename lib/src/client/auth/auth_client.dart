@@ -1,174 +1,492 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:path/path.dart' as path;
 
+import '../../models/auth_session.dart';
 import '../../models/token.dart';
+import '../../oauth/loopback_redirect_server.dart';
+import '../../oauth/oauth_config.dart';
+import '../../oauth/oauth_redirect_handler.dart';
+import '../../oauth/oauth_redirect_transport.dart';
+import '../../oauth/oauth_session.dart';
+import '../../oauth/oauth_token_response.dart';
+import '../../oauth/pkce.dart';
 import '../../utils/api_client.dart';
 import '../../utils/token_storage.dart';
-import 'dto.dart';
-
-const String _gatewayPrefix = '/liteAgent';
 
 String _getDefaultTokenStoragePath() {
   final homeDir = Platform.environment['HOME'] ??
       Platform.environment['USERPROFILE'] ??
       Platform.environment['APPDATA'] ??
       '';
-  return path.join(homeDir, '.agentos', 'auth', 'token.json');
+  return path.join(homeDir, '.agentos', 'auth', 'session.json');
 }
 
-String _buildBaseUrl(String serverAddress) {
-  if (serverAddress.isEmpty) return _gatewayPrefix;
-  if (serverAddress.endsWith('/')) {
-    return serverAddress.substring(0, serverAddress.length - 1) + _gatewayPrefix;
+String _normalizeServerAddress(String serverAddress) {
+  var normalized = serverAddress.trim();
+  while (normalized.endsWith('/')) {
+    normalized = normalized.substring(0, normalized.length - 1);
   }
-  return '$serverAddress$_gatewayPrefix';
+  return normalized;
 }
 
-/// 认证客户端
-///
-/// 提供登录、登出、Token 管理等功能。
-/// 默认使用 DefaultTokenStorage 持久化 Token。
+/// OAuth2 认证客户端（Authorization Code + PKCE）
 class AuthClient {
   AuthClient({
     ApiClient? apiClient,
-    String? baseUrl,
     TokenStorage? tokenStorage,
     String? storagePath,
-  })  : _apiClient = apiClient ?? ApiClient(baseUrl: baseUrl),
-        _tokenStorage = tokenStorage ?? 
-            (storagePath != null 
-                ? DefaultTokenStorage(storagePath: storagePath)
-                : DefaultTokenStorage(storagePath: _getDefaultTokenStoragePath()));
+  })  : _apiClient = apiClient ?? ApiClient(),
+        _tokenStorage = tokenStorage ??
+            DefaultTokenStorage(
+              storagePath: storagePath ?? _getDefaultTokenStoragePath(),
+            );
 
   final ApiClient _apiClient;
   final TokenStorage? _tokenStorage;
 
   AuthToken? _currentToken;
   String? _currentServerAddress;
+  LoopbackRedirectServer? _activeOAuthLoginLoopback;
+  OAuthRedirectHandler? _activeOAuthRedirectHandler;
+  bool _oauthLoginCancelled = false;
 
-  /// 当前 Token
   AuthToken? get currentToken => _currentToken;
-
-  /// 当前服务器地址
   String? get currentServerAddress => _currentServerAddress;
+  bool get isAuthenticated =>
+      _currentToken != null && _currentServerAddress != null;
 
-  /// 是否已认证
-  bool get isAuthenticated => _currentToken != null;
-
-  /// 从存储加载 Token
+  /// 从本地恢复会话
   Future<void> initialize({String? serverAddress}) async {
-    if (_tokenStorage == null) return;
+    final session = await _tokenStorage?.loadSession();
+    if (session != null) {
+      _applySession(session);
+      return;
+    }
 
-    final token = await _tokenStorage.loadToken();
-    if (token != null) {
-      _currentToken = token;
-      _apiClient.setAuthToken(token.accessToken);
-      
-      if (serverAddress != null) {
-        _currentServerAddress = serverAddress;
-        _apiClient.dio.options.baseUrl = _buildBaseUrl(serverAddress);
-      }
+    if (serverAddress != null) {
+      _currentServerAddress = _normalizeServerAddress(serverAddress);
     }
   }
 
-  /// 登录
-  /// 
-  /// [serverAddress] 服务器地址，例如 "https://api.example.com"
-  /// [email] 邮箱（登录凭证）
-  /// [password] 密码
-  Future<LoginResponse> login({
+  /// 准备 OAuth 授权（生成 PKCE / state / 授权 URL）
+  OAuthLoginSession beginOAuthLogin({
     required String serverAddress,
-    required String email,
-    required String password,
+    OAuthConfig config = const OAuthConfig(),
+  }) {
+    final normalizedServer = _normalizeServerAddress(serverAddress);
+    final redirectUri = config.redirectUri;
+    final state = Pkce.generateState();
+    final codeVerifier = Pkce.generateVerifier();
+    final codeChallenge = Pkce.challengeS256(codeVerifier);
+
+    final authorizationUrl = Uri.parse(
+      '$normalizedServer${config.authorizePath}',
+    ).replace(
+      queryParameters: {
+        'response_type': 'code',
+        'client_id': config.clientId,
+        'redirect_uri': redirectUri.toString(),
+        'scope': config.scope,
+        'state': state,
+        'code_challenge': codeChallenge,
+        'code_challenge_method': 'S256',
+        if (config.authorizationPrompt != null &&
+            config.authorizationPrompt!.isNotEmpty)
+          'prompt': config.authorizationPrompt!,
+      },
+    ).toString();
+
+    return OAuthLoginSession(
+      serverAddress: normalizedServer,
+      config: config,
+      redirectUri: redirectUri,
+      state: state,
+      codeVerifier: codeVerifier,
+      authorizationUrl: authorizationUrl,
+    );
+  }
+
+  /// 处理 loopback 回调并换取 token
+  Future<AuthToken> completeOAuthLogin({
+    required OAuthLoginSession session,
+    required Uri callbackUri,
   }) async {
-    try {
-      final apiClient = ApiClient(baseUrl: _buildBaseUrl(serverAddress));
-      final response = await apiClient.dio.post(
-        '/v1/agentOS/login',
-        queryParameters: {
-          'email': email,
-          'password': password,
-        },
-      );
+    final returnedState = callbackUri.queryParameters['state'];
+    if (returnedState != session.state) {
+      throw Exception('OAuth state 校验失败');
+    }
 
-      final loginResponse = LoginResponse.fromJson(
-        response.data as Map<String, dynamic>,
-      );
+    final code = callbackUri.queryParameters['code'];
+    if (code == null || code.isEmpty) {
+      throw Exception('OAuth 回调缺少 authorization code');
+    }
 
-      if (loginResponse.code != 0 && loginResponse.code != 200) {
-        throw Exception('登录失败: ${loginResponse.message}');
+    final token = await _exchangeAuthorizationCode(
+      serverAddress: session.serverAddress,
+      config: session.config,
+      code: code,
+      redirectUri: session.redirectUri,
+      codeVerifier: session.codeVerifier,
+    );
+
+    await _persistSession(
+      AuthSession(serverAddress: session.serverAddress, token: token),
+    );
+    return token;
+  }
+
+  /// 取消进行中的 OAuth 登录
+  Future<void> cancelOAuthLogin() async {
+    _oauthLoginCancelled = true;
+    final handler = _activeOAuthRedirectHandler;
+    _activeOAuthRedirectHandler = null;
+    await handler?.cancel();
+
+    final loopback = _activeOAuthLoginLoopback;
+    _activeOAuthLoginLoopback = null;
+    await loopback?.stop();
+    await LoopbackRedirectServer.releasePort();
+  }
+
+  /// 一键 OAuth 登录：loopback 本地 HTML 回调 + 浏览器授权
+  Future<AuthToken> loginWithOAuth({
+    required String serverAddress,
+    required Future<void> Function(String authorizationUrl) openAuthorizationUrl,
+    OAuthConfig config = const OAuthConfig(),
+    OAuthRedirectHandler? redirectHandler,
+    Duration callbackTimeout = const Duration(minutes: 5),
+  }) async {
+    final transport = config.resolvedRedirectTransport;
+    final session = beginOAuthLogin(
+      serverAddress: serverAddress,
+      config: config,
+    );
+
+    _oauthLoginCancelled = false;
+
+    if (transport == OAuthRedirectTransport.customScheme) {
+      final handler = redirectHandler;
+      if (handler == null) {
+        throw ArgumentError(
+          '当前平台使用自定义 Scheme 回调，请提供 redirectHandler',
+        );
       }
+      _activeOAuthRedirectHandler = handler;
+      try {
+        await openAuthorizationUrl(session.authorizationUrl);
+        final callbackUri =
+            await handler.waitForRedirect(timeout: callbackTimeout);
+        if (_oauthLoginCancelled) {
+          throw const OAuthLoginCancelledException();
+        }
+        return await completeOAuthLogin(
+          session: session,
+          callbackUri: callbackUri,
+        );
+      } catch (e) {
+        if (_oauthLoginCancelled || e is OAuthLoginCancelledException) {
+          throw const OAuthLoginCancelledException();
+        }
+        if (e is StateError &&
+            e.message == 'OAuth redirect wait cancelled') {
+          throw const OAuthLoginCancelledException();
+        }
+        if (e is TimeoutException) {
+          throw Exception(
+            '等待 OAuth 回调超时：浏览器未回跳到 ${config.redirectUri}。\n'
+            '请确认认证中心已为 agentos-desktop 登记该 redirect_uri。',
+          );
+        }
+        rethrow;
+      } finally {
+        if (_activeOAuthRedirectHandler == handler) {
+          _activeOAuthRedirectHandler = null;
+        }
+        _oauthLoginCancelled = false;
+      }
+    }
 
-      _currentToken = loginResponse.token;
-      _currentServerAddress = serverAddress;
-      _apiClient.setAuthToken(loginResponse.token.accessToken);
-      _apiClient.dio.options.baseUrl = _buildBaseUrl(serverAddress);
+    final loopback = LoopbackRedirectServer(
+      host: config.redirectHost,
+      port: config.redirectPort,
+      callbackPath: config.redirectPath,
+      loginSuccessPath: OAuthDefaults.loginSuccessPath,
+      logoutSuccessPath: OAuthDefaults.logoutSuccessPath,
+    );
 
-      await _tokenStorage?.saveToken(loginResponse.token);
-
-      return loginResponse;
-    } on DioException catch (e) {
-      throw _handleError(e);
+    _activeOAuthLoginLoopback = loopback;
+    var loginSucceeded = false;
+    try {
+      await loopback.start();
+      await openAuthorizationUrl(session.authorizationUrl);
+      final callbackUri =
+          await loopback.waitForCallback(timeout: callbackTimeout);
+      final token =
+          await completeOAuthLogin(session: session, callbackUri: callbackUri);
+      loginSucceeded = true;
+      return token;
+    } catch (e) {
+      if (_oauthLoginCancelled) {
+        throw const OAuthLoginCancelledException();
+      }
+      await loopback.stop();
+      if (e is TimeoutException) {
+        throw Exception(
+          '等待 OAuth 回调超时：浏览器可能已在认证中心网站登录成功，但未跳转到 '
+          '${config.redirectUri}。\n'
+          '请检查认证中心登录页是否在成功后跳回 redirect 参数中的 /oauth2/authorize。',
+        );
+      }
+      rethrow;
+    } finally {
+      if (_activeOAuthLoginLoopback == loopback) {
+        _activeOAuthLoginLoopback = null;
+      }
+      _oauthLoginCancelled = false;
+      if (loginSucceeded) {
+        loopback.scheduleStop();
+      }
     }
   }
 
-  /// 刷新 Token
-  Future<LoginResponse> refreshToken() async {
-    if (_currentToken == null || _currentServerAddress == null) {
+  /// 使用 refresh_token 刷新 access_token
+  Future<AuthToken> refreshToken() async {
+    final token = _currentToken;
+    final serverAddress = _currentServerAddress;
+    if (token == null || serverAddress == null) {
       throw Exception('未登录，无法刷新 Token');
     }
 
+    final refreshToken = token.refreshToken;
+    if (refreshToken == null || refreshToken.isEmpty) {
+      throw Exception('缺少 refresh_token，请重新登录');
+    }
+
     try {
-      final apiClient = ApiClient(baseUrl: _buildBaseUrl(_currentServerAddress!));
-      apiClient.setAuthToken(_currentToken!.accessToken);
-      
-      final response = await apiClient.dio.post('/v1/agentOS/refreshToken');
-      
-      final refreshResponse = LoginResponse.fromJson(
+      final dio = Dio(BaseOptions(
+        baseUrl: serverAddress,
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 30),
+        headers: {
+          Headers.contentTypeHeader: Headers.formUrlEncodedContentType,
+        },
+      ));
+
+      final response = await dio.post(
+        OAuthDefaults.tokenPath,
+        data: {
+          'grant_type': 'refresh_token',
+          'client_id': OAuthDefaults.clientId,
+          'refresh_token': refreshToken,
+        },
+      );
+
+      final oauthToken = OAuthTokenResponse.fromJson(
         response.data as Map<String, dynamic>,
       );
-      
-      if (refreshResponse.code != 0 && refreshResponse.code != 200) {
-        throw Exception('刷新 Token 失败: ${refreshResponse.message}');
+      if (oauthToken.accessToken.isEmpty) {
+        throw Exception('刷新 Token 失败：响应缺少 access_token');
       }
 
-      _currentToken = refreshResponse.token;
-      _apiClient.setAuthToken(refreshResponse.token.accessToken);
-      await _tokenStorage?.saveToken(refreshResponse.token);
+      final refreshed = oauthToken.toAuthToken().copyWith(
+            refreshToken: oauthToken.refreshToken ?? refreshToken,
+          );
 
-      return refreshResponse;
+      await _persistSession(
+        AuthSession(serverAddress: serverAddress, token: refreshed),
+      );
+      return refreshed;
     } on DioException catch (e) {
       throw _handleError(e);
     }
   }
 
-  /// 登出
-  Future<void> logout() async {
+  /// 构建远端登出 URL（浏览器跳转 `GET /api/v1/auth/logout`）
+  String buildLogoutUrl({
+    required String serverAddress,
+    required Uri postLogoutRedirectUri,
+    OAuthConfig config = const OAuthConfig(),
+  }) {
+    final normalizedServer = _normalizeServerAddress(serverAddress);
+    return Uri.parse('$normalizedServer${config.logoutPath}').replace(
+      queryParameters: {
+        'client_id': config.clientId,
+        'post_logout_redirect_uri': postLogoutRedirectUri.toString(),
+      },
+    ).toString();
+  }
+
+  /// 本地登出：仅清除本机会话与 Token 存储
+  Future<void> logoutLocal() async {
+    _currentToken = null;
+    _currentServerAddress = null;
+    _apiClient.clearAuthToken();
+    await _tokenStorage?.clearSession();
+  }
+
+  /// 本地登出（[logoutLocal] 的别名）
+  Future<void> logout() => logoutLocal();
+
+  /// 远端登出：撤销服务端 Token、清除本地会话，并打开浏览器清理认证中心 SSO 会话
+  Future<void> logoutRemote({
+    required Future<void> Function(String logoutUrl) openLogoutUrl,
+    OAuthConfig config = const OAuthConfig(),
+    Uri? postLogoutRedirectUri,
+    OAuthRedirectHandler? redirectHandler,
+    Duration redirectTimeout = const Duration(minutes: 2),
+  }) async {
+    final token = _currentToken;
+    final serverAddress = _currentServerAddress;
+
+    if (serverAddress == null) {
+      await logoutLocal();
+      return;
+    }
+
+    final transport = config.resolvedRedirectTransport;
+    final redirectUri =
+        postLogoutRedirectUri ?? config.postLogoutRedirectUri;
+    final logoutUrl = buildLogoutUrl(
+      serverAddress: serverAddress,
+      postLogoutRedirectUri: redirectUri,
+      config: config,
+    );
+
+    var logoutRedirectReceived = false;
     try {
-      if (_currentToken != null && _currentServerAddress != null) {
-        final apiClient = ApiClient(baseUrl: _buildBaseUrl(_currentServerAddress!));
-        apiClient.setAuthToken(_currentToken!.accessToken);
-        
-        final response = await apiClient.dio.post('/v1/agentOS/logout');
-        
-        final logoutResponse = LogoutResponse.fromJson(
-          response.data as Map<String, dynamic>,
+      if (transport == OAuthRedirectTransport.customScheme) {
+        final handler = redirectHandler;
+        if (handler == null) {
+          throw ArgumentError(
+            '当前平台使用自定义 Scheme 登出回跳，请提供 redirectHandler',
+          );
+        }
+        await openLogoutUrl(logoutUrl);
+        await handler.waitForRedirect(timeout: redirectTimeout);
+        logoutRedirectReceived = true;
+      } else {
+        final loopback = LoopbackRedirectServer(
+          host: config.redirectHost,
+          port: config.redirectPort,
+          callbackPath: config.redirectPath,
+          loginSuccessPath: OAuthDefaults.loginSuccessPath,
+          logoutSuccessPath: OAuthDefaults.logoutSuccessPath,
+          mode: LoopbackMode.postLogout,
         );
-        
-        if (logoutResponse.code != 0 && logoutResponse.code != 200) {
-          throw Exception('登出失败: ${logoutResponse.message}');
+
+        await loopback.start();
+        try {
+          await openLogoutUrl(logoutUrl);
+          await loopback.waitForCallback(timeout: redirectTimeout);
+          logoutRedirectReceived = true;
+        } finally {
+          if (logoutRedirectReceived) {
+            loopback.scheduleStop();
+          } else {
+            await loopback.stop();
+          }
         }
       }
+
+      if (token != null) {
+        await _revokeAccessToken(
+          serverAddress: serverAddress,
+          token: token.accessToken,
+          config: config,
+        );
+      }
+      await logoutLocal();
+    } on TimeoutException {
+      await logoutLocal();
+      throw Exception(
+        '远端登出超时：浏览器未在 ${redirectTimeout.inSeconds} 秒内回跳到 $redirectUri。\n'
+        '若网站已显示登录成功但未回跳本地，说明认证中心前端未完成登出 redirect。',
+      );
+    }
+  }
+
+  /// 撤销 access_token（RFC 7009，best effort）
+  Future<void> _revokeAccessToken({
+    required String serverAddress,
+    required String token,
+    OAuthConfig config = const OAuthConfig(),
+  }) async {
+    try {
+      final dio = Dio(BaseOptions(
+        baseUrl: serverAddress,
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 30),
+        headers: {
+          Headers.contentTypeHeader: Headers.formUrlEncodedContentType,
+        },
+      ));
+
+      await dio.post(
+        config.revokePath,
+        data: {
+          'token': token,
+          'client_id': config.clientId,
+        },
+      );
+    } on DioException {
+      // 撤销失败不阻塞本地登出
+    }
+  }
+
+  Future<AuthToken> _exchangeAuthorizationCode({
+    required String serverAddress,
+    required OAuthConfig config,
+    required String code,
+    required Uri redirectUri,
+    required String codeVerifier,
+  }) async {
+    try {
+      final dio = Dio(BaseOptions(
+        baseUrl: serverAddress,
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 30),
+        headers: {
+          Headers.contentTypeHeader: Headers.formUrlEncodedContentType,
+        },
+      ));
+
+      final response = await dio.post(
+        config.tokenPath,
+        data: {
+          'grant_type': 'authorization_code',
+          'client_id': config.clientId,
+          'code': code,
+          'redirect_uri': redirectUri.toString(),
+          'code_verifier': codeVerifier,
+        },
+      );
+
+      final oauthToken = OAuthTokenResponse.fromJson(
+        response.data as Map<String, dynamic>,
+      );
+      if (oauthToken.accessToken.isEmpty) {
+        throw Exception('换取 Token 失败：响应缺少 access_token');
+      }
+
+      return oauthToken.toAuthToken();
     } on DioException catch (e) {
       throw _handleError(e);
-    } finally {
-      _currentToken = null;
-      _currentServerAddress = null;
-      _apiClient.clearAuthToken();
-      await _tokenStorage?.clearToken();
     }
+  }
+
+  void _applySession(AuthSession session) {
+    _currentToken = session.token;
+    _currentServerAddress = session.serverAddress;
+    _apiClient.setAuthToken(session.token.accessToken);
+    _apiClient.dio.options.baseUrl = session.serverAddress;
+  }
+
+  Future<void> _persistSession(AuthSession session) async {
+    _applySession(session);
+    await _tokenStorage?.saveSession(session);
   }
 
   Exception _handleError(DioException e) {
@@ -177,8 +495,11 @@ class AuthClient {
       final data = e.response!.data;
 
       String message = '请求失败';
-      if (data is Map<String, dynamic> && data.containsKey('message')) {
-        message = data['message'] as String;
+      if (data is Map<String, dynamic>) {
+        message = data['error_description'] as String? ??
+            data['message'] as String? ??
+            data['error'] as String? ??
+            message;
       } else if (data is String) {
         message = data;
       }
@@ -198,7 +519,7 @@ class AuthClient {
           return Exception('请求失败 ($statusCode)：$message');
       }
     }
-    
+
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
         return Exception('连接超时，请检查网络连接');
@@ -220,4 +541,12 @@ class AuthClient {
         return Exception('网络错误：$errorMsg (类型: ${e.type})');
     }
   }
+}
+
+/// 用户主动取消 OAuth 登录（如关闭登录弹窗）
+class OAuthLoginCancelledException implements Exception {
+  const OAuthLoginCancelledException();
+
+  @override
+  String toString() => 'OAuth 登录已取消';
 }

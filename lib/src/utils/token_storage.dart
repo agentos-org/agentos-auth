@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import '../models/token.dart';
+import '../models/auth_session.dart';
 
 const String _obfuscationKey = 'AgentOS-Auth-Obf-Key';
 
@@ -25,41 +25,33 @@ String _deobfuscate(String cipher) {
   return String.fromCharCodes(result);
 }
 
-/// Token 存储接口
+/// 认证会话存储接口
 abstract class TokenStorage {
-  /// 保存 Token
-  Future<void> saveToken(AuthToken token);
-
-  /// 加载 Token
-  Future<AuthToken?> loadToken();
-
-  /// 清除 Token
-  Future<void> clearToken();
-
-  /// 是否有保存的 Token
-  Future<bool> hasToken();
+  Future<void> saveSession(AuthSession session);
+  Future<AuthSession?> loadSession();
+  Future<void> clearSession();
+  Future<bool> hasSession();
 }
 
-/// 默认实现：使用混淆后的 JSON 文件存储
+/// 默认实现：混淆 JSON 文件
 class DefaultTokenStorage implements TokenStorage {
   DefaultTokenStorage({required this.storagePath});
 
-  /// Token 文件的完整路径
   final String storagePath;
 
   @override
-  Future<void> saveToken(AuthToken token) async {
+  Future<void> saveSession(AuthSession session) async {
     final file = File(storagePath);
     final dir = file.parent;
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
-    final plain = jsonEncode(token.toJson());
+    final plain = jsonEncode(session.toJson());
     await file.writeAsString(_obfuscate(plain));
   }
 
   @override
-  Future<AuthToken?> loadToken() async {
+  Future<AuthSession?> loadSession() async {
     final file = File(storagePath);
     if (!await file.exists()) return null;
 
@@ -69,14 +61,14 @@ class DefaultTokenStorage implements TokenStorage {
 
       final jsonStr = _deobfuscate(content);
       final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-      return AuthToken.fromJson(json);
+      return AuthSession.fromJson(json);
     } catch (_) {
       return null;
     }
   }
 
   @override
-  Future<void> clearToken() async {
+  Future<void> clearSession() async {
     final file = File(storagePath);
     if (await file.exists()) {
       await file.delete();
@@ -84,7 +76,7 @@ class DefaultTokenStorage implements TokenStorage {
   }
 
   @override
-  Future<bool> hasToken() async {
+  Future<bool> hasSession() async {
     final file = File(storagePath);
     if (!await file.exists()) return false;
 

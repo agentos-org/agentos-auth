@@ -1,7 +1,0 @@
-name: agentos_auth_example
-description: Example for agentos_auth
-environment:
-  sdk: ^3.9.0
-dependencies:
-  agentos_auth:
-    path: ..
