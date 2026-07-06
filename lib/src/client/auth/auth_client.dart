@@ -24,13 +24,8 @@ String _getDefaultTokenStoragePath() {
   return path.join(homeDir, '.agentos', 'auth', 'session.json');
 }
 
-String _normalizeServerAddress(String serverAddress) {
-  var normalized = serverAddress.trim();
-  while (normalized.endsWith('/')) {
-    normalized = normalized.substring(0, normalized.length - 1);
-  }
-  return normalized;
-}
+String _normalizeServerAddress(String serverAddress) =>
+    trimServerAddress(serverAddress);
 
 /// OAuth2 认证客户端（Authorization Code + PKCE）
 class AuthClient {
@@ -83,7 +78,7 @@ class AuthClient {
     final codeChallenge = Pkce.challengeS256(codeVerifier);
 
     final authorizationUrl = Uri.parse(
-      '$normalizedServer${config.authorizePath}',
+      '${serverApiBase(normalizedServer)}${config.authorizePath}',
     ).replace(
       queryParameters: {
         'response_type': 'code',
@@ -267,7 +262,7 @@ class AuthClient {
 
     try {
       final dio = Dio(BaseOptions(
-        baseUrl: serverAddress,
+        baseUrl: serverApiBase(serverAddress),
         connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 30),
         headers: {
@@ -311,7 +306,9 @@ class AuthClient {
     OAuthConfig config = const OAuthConfig(),
   }) {
     final normalizedServer = _normalizeServerAddress(serverAddress);
-    return Uri.parse('$normalizedServer${config.logoutPath}').replace(
+    return Uri.parse(
+      '${serverApiBase(normalizedServer)}${config.logoutPath}',
+    ).replace(
       queryParameters: {
         'client_id': config.clientId,
         'post_logout_redirect_uri': postLogoutRedirectUri.toString(),
@@ -416,7 +413,7 @@ class AuthClient {
   }) async {
     try {
       final dio = Dio(BaseOptions(
-        baseUrl: serverAddress,
+        baseUrl: serverApiBase(serverAddress),
         connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 30),
         headers: {
@@ -445,7 +442,7 @@ class AuthClient {
   }) async {
     try {
       final dio = Dio(BaseOptions(
-        baseUrl: serverAddress,
+        baseUrl: serverApiBase(serverAddress),
         connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 30),
         headers: {
@@ -481,7 +478,7 @@ class AuthClient {
     _currentToken = session.token;
     _currentServerAddress = session.serverAddress;
     _apiClient.setAuthToken(session.token.accessToken);
-    _apiClient.dio.options.baseUrl = session.serverAddress;
+    _apiClient.dio.options.baseUrl = serverApiBase(session.serverAddress);
   }
 
   Future<void> _persistSession(AuthSession session) async {

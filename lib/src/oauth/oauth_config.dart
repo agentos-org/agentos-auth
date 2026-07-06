@@ -136,8 +136,24 @@ class OAuthConfig {
   String get scope => scopes.join(' ');
 }
 
+/// 去掉首尾空白与末尾斜杠。
+String trimServerAddress(String serverAddress) {
+  var normalized = serverAddress.trim();
+  while (normalized.endsWith('/')) {
+    normalized = normalized.substring(0, normalized.length - 1);
+  }
+  return normalized;
+}
+
+/// 远端 API 根地址：`{域名}/agentos-server`。
+String serverApiBase(String serverAddress) =>
+    '${trimServerAddress(serverAddress)}${OAuthDefaults.serverApiPrefix}';
+
 /// AgentOS Desktop OAuth2 默认值
 abstract final class OAuthDefaults {
+  /// 远端 API 统一前缀（对齐 agentos-server 网关 context-path）
+  static const String serverApiPrefix = '/agentos-server';
+
   static const String clientId = 'agentos-desktop';
 
   static const String redirectHost = '127.0.0.1';

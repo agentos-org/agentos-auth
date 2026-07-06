@@ -18,21 +18,21 @@ AgentOS OAuth2 认证 SDK，面向桌面端等原生客户端，提供 **Authori
 
 ## 服务端接口（对齐 agentos-server）
 
-配置纯服务器地址，不含末尾斜杠，例如：
+配置纯服务器域名，不含路径前缀与末尾斜杠，例如：
 
 ```text
 https://your-server.example.com
 ```
 
-SDK 直接请求以下路径（**不走** `/liteAgent` 前缀）：
+不要填写 `/agentos-server`；SDK 请求时会自动拼到 `{域名}/agentos-server` 下：
 
 | 用途 | 方法 | 路径 |
 |------|------|------|
-| 授权页 | GET（浏览器打开） | `/oauth2/authorize` |
-| 换 Token | POST | `/oauth2/token` |
-| 刷新 Token | POST | `/oauth2/token` |
-| 撤销 Token | POST | `/oauth2/revoke` |
-| 远端登出 | GET（浏览器跳转） | `/api/v1/auth/logout` |
+| 授权页 | GET（浏览器打开） | `/agentos-server/oauth2/authorize` |
+| 换 Token | POST | `/agentos-server/oauth2/token` |
+| 刷新 Token | POST | `/agentos-server/oauth2/token` |
+| 撤销 Token | POST | `/agentos-server/oauth2/revoke` |
+| 远端登出 | GET（浏览器跳转） | `/agentos-server/api/v1/auth/logout` |
 
 ### 默认 OAuth 客户端
 
@@ -57,7 +57,7 @@ SDK 直接请求以下路径（**不走** `/liteAgent` 前缀）：
 ### 授权（浏览器）
 
 ```text
-GET /oauth2/authorize
+GET /agentos-server/oauth2/authorize
   ?response_type=code
   &client_id=agentos-desktop
   &redirect_uri=http://127.0.0.1:53682/oauth/callback
@@ -71,7 +71,7 @@ GET /oauth2/authorize
 ### 换 Token / 刷新
 
 ```text
-POST /oauth2/token
+POST /agentos-server/oauth2/token
 Content-Type: application/x-www-form-urlencoded
 
 # 授权码换 Token
@@ -96,12 +96,12 @@ grant_type=refresh_token
 **远端登出**：
 
 ```text
-GET /api/v1/auth/logout
+GET /agentos-server/api/v1/auth/logout
   ?client_id=agentos-desktop
   &post_logout_redirect_uri=http://127.0.0.1:53682/oauth/logout/success
 ```
 
-流程：浏览器打开登出 URL（携带 cookie 清 SSO）→ loopback 等待回跳 → `POST /oauth2/revoke` 撤销 access_token → 清本地会话。
+流程：浏览器打开登出 URL（携带 cookie 清 SSO）→ loopback 等待回跳 → `POST /agentos-server/oauth2/revoke` 撤销 access_token → 清本地会话。
 
 ## Loopback 与浏览器成功页
 
@@ -114,7 +114,7 @@ App                 Loopback :53682              Browser           AgentOS Serve
  |                        |                        |                      |
  |-- start loopback ----->|                        |                      |
  |-- open authorize URL -------------------------->|                      |
- |                        |                        |-- /oauth2/authorize ->|
+ |                        |                        |-- /agentos-server/oauth2/authorize ->|
  |                        |<-- /oauth/callback?code=... -------------------|
  |<-- 收到 code，换 token -|                        |                      |
  |                        |-- 302 /oauth/login/success ------------------>|
