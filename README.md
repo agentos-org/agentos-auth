@@ -11,8 +11,8 @@ AgentOS OAuth2 认证 SDK，面向桌面端等原生客户端，提供 **Authori
 - **刷新 Token**：使用 `refresh_token` 换取新的 `access_token`
 - **取消登录**：`cancelOAuthLogin()` 关闭 loopback 并中止等待
 - **两种登出**：
-  - **本地登出** `logoutLocal()` / `logout()`：仅清除本机会话
-  - **远端登出** `logoutRemote()`：浏览器清理 SSO → 撤销 Token → 清本地
+  - **登出** `logout()`：`GET /api/v1/auth/logout` 撤销服务端 Token → 清本地
+  - **仅本地** `logoutLocal()`：不请求服务端，只清除本机会话
 
 > 业务 API（如用户信息、模型列表）不在本 SDK 范围内，由应用层或独立 API 包调用。
 
@@ -32,7 +32,7 @@ https://your-server.example.com
 | 换 Token | POST | `/agentos-server/oauth2/token` |
 | 刷新 Token | POST | `/agentos-server/oauth2/token` |
 | 撤销 Token | POST | `/agentos-server/oauth2/revoke` |
-| 远端登出 | GET（浏览器跳转） | `/agentos-server/api/v1/auth/logout` |
+| 登出 | GET | `/agentos-server/api/v1/auth/logout` |
 
 ### 默认 OAuth 客户端
 
@@ -50,9 +50,8 @@ https://your-server.example.com
 | 用途 | URL |
 |------|-----|
 | OAuth 登录回调 | `http://127.0.0.1:53682/oauth/callback` |
-| 远端登出回跳 | `http://127.0.0.1:53682/oauth/logout/success` |
 
-`post_logout_redirect_uri` 的 scheme + host + port 须与已登记 redirect 同源。
+登出接口建议请求头：`Authorization: Bearer <access_token>`。携带有效 token 时，服务端会撤销 access / refresh token 并清理授权记录；未携带或 token 无效时仍返回成功，但可能不会撤销已签发 token。
 
 ### 授权（浏览器）
 
@@ -91,17 +90,22 @@ grant_type=refresh_token
 
 ### 登出
 
-**本地登出**：SDK 清除内存与本地文件，不请求服务端。
-
-**远端登出**：
-
 ```text
 GET /agentos-server/api/v1/auth/logout
-  ?client_id=agentos-desktop
-  &post_logout_redirect_uri=http://127.0.0.1:53682/oauth/logout/success
+Authorization: Bearer <access_token>
 ```
 
-流程：浏览器打开登出 URL（携带 cookie 清 SSO）→ loopback 等待回跳 → `POST /agentos-server/oauth2/revoke` 撤销 access_token → 清本地会话。
+响应示例：
+
+```json
+{
+  "code": 200,
+  "msg": "操作成功",
+  "data": null
+}
+```
+
+`logout()` 会先请求上述接口（自动附带当前 access_token），再清除本地会话。仅清本地可调用 `logoutLocal()`。
 
 ## Loopback 与浏览器成功页
 
@@ -151,6 +155,18 @@ dart pub get
 ```
 
 ## 使用指南
+
+### 本地调试（example）
+
+在 `agentos-auth` 目录下运行。先修改 `example/example.dart` 顶部的 `_serverAddress` 常量。
+
+```bash
+cd agentos-auth
+dart run example/example.dart
+dart run example/example.dart logout
+```
+
+macOS / Linux / Windows 会尝试自动打开浏览器；失败则打印授权 URL。
 
 ### 一键登录（推荐）
 
@@ -225,21 +241,11 @@ if (client.currentToken?.isExpired == true) {
 ### 登出
 
 ```dart
+// 远端登出 + 清本地（推荐）
+await client.logout();
+
 // 仅清本地
 await client.logoutLocal();
-
-// 远端登出（浏览器 + 撤销 token + 清本地）
-await client.logoutRemote(
-  openLogoutUrl: (url) async {
-    await Process.run('open', [url]);
-  },
-);
-
-// 仅拼登出 URL
-final url = client.buildLogoutUrl(
-  serverAddress: serverAddress,
-  postLogoutRedirectUri: const OAuthConfig().postLogoutRedirectUri,
-);
 ```
 
 ### 仅内存（不落盘）

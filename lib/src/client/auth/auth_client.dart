@@ -299,21 +299,29 @@ class AuthClient {
     }
   }
 
-  /// 构建远端登出 URL（浏览器跳转 `GET /api/v1/auth/logout`）
-  String buildLogoutUrl({
-    required String serverAddress,
-    required Uri postLogoutRedirectUri,
-    OAuthConfig config = const OAuthConfig(),
-  }) {
-    final normalizedServer = _normalizeServerAddress(serverAddress);
-    return Uri.parse(
-      '${serverApiBase(normalizedServer)}${config.logoutPath}',
-    ).replace(
-      queryParameters: {
-        'client_id': config.clientId,
-        'post_logout_redirect_uri': postLogoutRedirectUri.toString(),
-      },
-    ).toString();
+  /// 登出：请求服务端撤销 Token，并清除本地会话
+  ///
+  /// `GET /api/v1/auth/logout`，建议携带 `Authorization: Bearer <access_token>`。
+  /// 服务端会撤销 access / refresh token；未携带或 token 无效时仍可能返回成功，
+  /// 但已签发的 token 不保证立即失效。
+  Future<void> logout({OAuthConfig config = const OAuthConfig()}) async {
+    final token = _currentToken;
+    final serverAddress = _currentServerAddress;
+
+    if (serverAddress != null) {
+      try {
+        await _requestServerLogout(
+          serverAddress: serverAddress,
+          accessToken: token?.accessToken,
+          config: config,
+        );
+      } catch (e) {
+        await logoutLocal();
+        rethrow;
+      }
+    }
+
+    await logoutLocal();
   }
 
   /// 本地登出：仅清除本机会话与 Token 存储
@@ -324,112 +332,42 @@ class AuthClient {
     await _tokenStorage?.clearSession();
   }
 
-  /// 本地登出（[logoutLocal] 的别名）
-  Future<void> logout() => logoutLocal();
-
-  /// 远端登出：撤销服务端 Token、清除本地会话，并打开浏览器清理认证中心 SSO 会话
-  Future<void> logoutRemote({
-    required Future<void> Function(String logoutUrl) openLogoutUrl,
-    OAuthConfig config = const OAuthConfig(),
-    Uri? postLogoutRedirectUri,
-    OAuthRedirectHandler? redirectHandler,
-    Duration redirectTimeout = const Duration(minutes: 2),
-  }) async {
-    final token = _currentToken;
-    final serverAddress = _currentServerAddress;
-
-    if (serverAddress == null) {
-      await logoutLocal();
-      return;
-    }
-
-    final transport = config.resolvedRedirectTransport;
-    final redirectUri =
-        postLogoutRedirectUri ?? config.postLogoutRedirectUri;
-    final logoutUrl = buildLogoutUrl(
-      serverAddress: serverAddress,
-      postLogoutRedirectUri: redirectUri,
-      config: config,
-    );
-
-    var logoutRedirectReceived = false;
-    try {
-      if (transport == OAuthRedirectTransport.customScheme) {
-        final handler = redirectHandler;
-        if (handler == null) {
-          throw ArgumentError(
-            '当前平台使用自定义 Scheme 登出回跳，请提供 redirectHandler',
-          );
-        }
-        await openLogoutUrl(logoutUrl);
-        await handler.waitForRedirect(timeout: redirectTimeout);
-        logoutRedirectReceived = true;
-      } else {
-        final loopback = LoopbackRedirectServer(
-          host: config.redirectHost,
-          port: config.redirectPort,
-          callbackPath: config.redirectPath,
-          loginSuccessPath: OAuthDefaults.loginSuccessPath,
-          logoutSuccessPath: OAuthDefaults.logoutSuccessPath,
-          mode: LoopbackMode.postLogout,
-        );
-
-        await loopback.start();
-        try {
-          await openLogoutUrl(logoutUrl);
-          await loopback.waitForCallback(timeout: redirectTimeout);
-          logoutRedirectReceived = true;
-        } finally {
-          if (logoutRedirectReceived) {
-            loopback.scheduleStop();
-          } else {
-            await loopback.stop();
-          }
-        }
-      }
-
-      if (token != null) {
-        await _revokeAccessToken(
-          serverAddress: serverAddress,
-          token: token.accessToken,
-          config: config,
-        );
-      }
-      await logoutLocal();
-    } on TimeoutException {
-      await logoutLocal();
-      throw Exception(
-        '远端登出超时：浏览器未在 ${redirectTimeout.inSeconds} 秒内回跳到 $redirectUri。\n'
-        '若网站已显示登录成功但未回跳本地，说明认证中心前端未完成登出 redirect。',
-      );
-    }
-  }
-
-  /// 撤销 access_token（RFC 7009，best effort）
-  Future<void> _revokeAccessToken({
+  /// 请求服务端登出
+  Future<void> _requestServerLogout({
     required String serverAddress,
-    required String token,
+    String? accessToken,
     OAuthConfig config = const OAuthConfig(),
   }) async {
+    final headers = <String, dynamic>{};
+    if (accessToken != null && accessToken.isNotEmpty) {
+      headers[HttpHeaders.authorizationHeader] = 'Bearer $accessToken';
+    }
+
     try {
       final dio = Dio(BaseOptions(
         baseUrl: serverApiBase(serverAddress),
         connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 30),
-        headers: {
-          Headers.contentTypeHeader: Headers.formUrlEncodedContentType,
-        },
+        headers: headers,
       ));
 
-      await dio.post(
-        config.revokePath,
-        data: {
-          'token': token,
-          'client_id': config.clientId,
-        },
-      );
-    } on DioException {
-      // 撤销失败不阻塞本地登出
+      final response = await dio.get(config.logoutPath);
+      final data = response.data;
+      if (data is! Map<String, dynamic>) {
+        return;
+      }
+
+      final code = data['code'];
+      if (code == null || code == 200 || code == 0) {
+        return;
+      }
+
+      final message = data['msg'] as String? ??
+          data['message'] as String? ??
+          '登出失败';
+      throw Exception(message);
+    } on DioException catch (e) {
+      throw _handleError(e);
     }
   }
 
@@ -495,6 +433,7 @@ class AuthClient {
       if (data is Map<String, dynamic>) {
         message = data['error_description'] as String? ??
             data['message'] as String? ??
+            data['msg'] as String? ??
             data['error'] as String? ??
             message;
       } else if (data is String) {
