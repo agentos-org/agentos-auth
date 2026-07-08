@@ -6,14 +6,15 @@ import 'package:path/path.dart' as path;
 /// 改这里为你的 AgentOS 服务器地址（不含 `/agentos-server` 后缀）
 const _serverAddress = 'https://your-server.example.com';
 
-/// 本地快速验证 OAuth 登录 / 登出。
+/// 本地快速验证 OAuth 登录 / 刷新 / 登出。
 ///
 /// ```bash
 /// cd agentos-auth
-/// dart run example/example.dart
 /// dart run example/example.dart login
-/// dart run example/example.dart logout
+/// dart run example/example.dart refresh
 /// dart run example/example.dart status
+/// dart run example/example.dart logout
+/// dart run example/example.dart full
 /// ```
 Future<void> main(List<String> args) async {
   final command = args.isNotEmpty ? args.first.toLowerCase() : 'full';
@@ -36,6 +37,11 @@ Future<void> main(List<String> args) async {
       await _ensureLoggedIn(client);
       _printStatus(client);
       return;
+    case 'refresh':
+      await _requireSession(client);
+      await _refresh(client);
+      _printStatus(client);
+      return;
     case 'logout':
       if (!client.isAuthenticated) {
         print('当前未登录，无需登出。');
@@ -49,13 +55,17 @@ Future<void> main(List<String> args) async {
       return;
     default:
       stderr.writeln('未知命令: $command');
-      stderr.writeln('可用: login | logout | status | full');
+      stderr.writeln('可用: login | refresh | logout | status | full');
       exitCode = 64;
   }
 }
 
 Future<void> _runFullFlow(AuthClient client) async {
   await _ensureLoggedIn(client);
+  _printStatus(client);
+
+  print('\n--- 刷新 access_token ---');
+  await _refresh(client);
   _printStatus(client);
 
   print('\n按 Enter 执行登出（将请求 GET /api/v1/auth/logout + Bearer）...');
@@ -84,6 +94,26 @@ Future<void> _ensureLoggedIn(AuthClient client) async {
   }
 }
 
+Future<void> _requireSession(AuthClient client) async {
+  if (client.isAuthenticated) {
+    return;
+  }
+  stderr.writeln('当前未登录。请先: dart run example/example.dart login');
+  exit(1);
+}
+
+Future<void> _refresh(AuthClient client) async {
+  print('请求 POST /oauth2/token (grant_type=refresh_token) ...');
+  try {
+    final token = await client.refreshToken();
+    print('刷新成功。');
+    print('新 access_token 前缀: ${_preview(token.accessToken)}');
+  } catch (e) {
+    print('刷新失败: $e');
+    exitCode = 1;
+  }
+}
+
 Future<void> _logout(AuthClient client) async {
   print('请求远端登出...');
   try {
@@ -105,6 +135,9 @@ void _printStatus(AuthClient client) {
   print('状态: 已登录');
   print('server: ${client.currentServerAddress}');
   print('access_token 前缀: ${_preview(token.accessToken)}');
+  print(
+    'refresh_token 前缀: ${token.refreshToken != null ? _preview(token.refreshToken!) : '(无)'}',
+  );
   print('过期时间: ${token.expiresAt}');
   print('是否即将过期: ${token.isExpired}');
 }
@@ -145,6 +178,9 @@ Future<bool> _tryOpenInBrowser(String url) async {
 }
 
 String _preview(String value, {int length = 12}) {
+  if (value.isEmpty) {
+    return '(空)';
+  }
   if (value.length <= length) {
     return value;
   }
