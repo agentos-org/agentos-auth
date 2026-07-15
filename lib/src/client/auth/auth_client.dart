@@ -248,7 +248,9 @@ class AuthClient {
   }
 
   /// 使用 refresh_token 刷新 access_token
-  Future<AuthToken> refreshToken() async {
+  Future<AuthToken> refreshToken({
+    OAuthConfig config = const OAuthConfig(),
+  }) async {
     final token = _currentToken;
     final serverAddress = _currentServerAddress;
     if (token == null || serverAddress == null) {
@@ -271,10 +273,10 @@ class AuthClient {
       ));
 
       final response = await dio.post(
-        OAuthDefaults.tokenPath,
+        config.tokenPath,
         data: {
           'grant_type': 'refresh_token',
-          'client_id': OAuthDefaults.clientId,
+          'client_id': config.clientId,
           'refresh_token': refreshToken,
         },
       );
