@@ -19,6 +19,7 @@ class OAuthConfig {
     this.revokePath = OAuthDefaults.revokePath,
     this.authorizationPrompt = OAuthDefaults.authorizationPrompt,
     this.redirectTransport,
+    this.redirectUriOverride,
   });
 
   final String clientId;
@@ -42,11 +43,15 @@ class OAuthConfig {
   /// 指定回调方式；默认按当前平台自动选择
   final OAuthRedirectTransport? redirectTransport;
 
+  /// WebShell 等场景使用的固定 redirect_uri（须事先在认证中心登记）
+  final Uri? redirectUriOverride;
+
   OAuthRedirectTransport get resolvedRedirectTransport =>
       redirectTransport ?? OAuthRedirectTransportResolver.forPlatform();
 
   /// 当前平台使用的 OAuth redirect_uri
-  Uri get redirectUri => redirectUriFor(resolvedRedirectTransport);
+  Uri get redirectUri =>
+      redirectUriOverride ?? redirectUriFor(resolvedRedirectTransport);
 
   /// 远端登出回跳地址（与 [redirectUri] 同平台策略）
   Uri get postLogoutRedirectUri =>
