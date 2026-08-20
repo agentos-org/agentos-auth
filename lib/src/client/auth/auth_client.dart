@@ -8,6 +8,7 @@ import '../../models/auth_session.dart';
 import '../../models/token.dart';
 import '../../oauth/loopback_redirect_server.dart';
 import '../../oauth/oauth_config.dart';
+import '../../oauth/oauth_device_code.dart';
 import '../../oauth/oauth_redirect_handler.dart';
 import '../../oauth/oauth_redirect_transport.dart';
 import '../../oauth/oauth_session.dart';
@@ -27,7 +28,7 @@ String _getDefaultTokenStoragePath() {
 String _normalizeServerAddress(String serverAddress) =>
     trimServerAddress(serverAddress);
 
-/// OAuth2 认证客户端（Authorization Code + PKCE）
+/// OAuth2 认证客户端（Authorization Code + PKCE / Device Code）
 class AuthClient {
   AuthClient({
     ApiClient? apiClient,
@@ -144,6 +145,133 @@ class AuthClient {
     _activeOAuthLoginLoopback = null;
     await loopback?.stop();
     await LoopbackRedirectServer.releasePort();
+  }
+
+  /// 发起 Device Code 授权（RFC 8628）
+  ///
+  /// 默认不传 `scope`，由认证中心按 client 已登记权限处理；
+  /// 需要显式申请时可设 [includeScope] 为 true。
+  Future<DeviceCodeSession> beginDeviceCodeLogin({
+    required String serverAddress,
+    OAuthConfig config = const OAuthConfig(),
+    bool includeScope = false,
+  }) async {
+    final normalizedServer = _normalizeServerAddress(serverAddress);
+
+    try {
+      final dio = Dio(BaseOptions(
+        baseUrl: serverApiBase(normalizedServer),
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 30),
+        headers: {
+          Headers.contentTypeHeader: Headers.formUrlEncodedContentType,
+        },
+      ));
+
+      final response = await dio.post(
+        config.deviceAuthorizationPath,
+        data: {
+          'client_id': config.clientId,
+          if (includeScope) 'scope': config.scope,
+        },
+      );
+
+      final data = response.data;
+      if (data is! Map<String, dynamic>) {
+        throw Exception('Device authorization 响应无效');
+      }
+
+      final deviceCode = data['device_code'] as String? ?? '';
+      if (deviceCode.isEmpty) {
+        throw Exception('Device authorization 响应缺少 device_code');
+      }
+
+      return DeviceCodeSession(
+        serverAddress: normalizedServer,
+        config: config,
+        deviceCode: deviceCode,
+        userCode: data['user_code'] as String? ?? '',
+        verificationUri: data['verification_uri'] as String? ?? '',
+        verificationUriComplete:
+            data['verification_uri_complete'] as String? ?? '',
+        expiresIn: data['expires_in'] as int? ?? 600,
+        interval: data['interval'] as int? ?? 5,
+      );
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// 轮询 Device Code 授权状态；成功时会持久化会话
+  Future<DeviceCodePollResult> pollDeviceCode({
+    required DeviceCodeSession session,
+  }) async {
+    if (session.isExpired) {
+      return DeviceCodePollResult.expired('Device code expired');
+    }
+
+    try {
+      final dio = Dio(BaseOptions(
+        baseUrl: serverApiBase(session.serverAddress),
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 30),
+        headers: {
+          Headers.contentTypeHeader: Headers.formUrlEncodedContentType,
+        },
+        validateStatus: (status) => status != null && status < 500,
+      ));
+
+      final response = await dio.post(
+        session.config.tokenPath,
+        data: {
+          'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
+          'client_id': session.config.clientId,
+          'device_code': session.deviceCode,
+        },
+      );
+
+      final data = response.data;
+      if (data is! Map<String, dynamic>) {
+        return DeviceCodePollResult.error('Invalid token response');
+      }
+
+      if (response.statusCode == 400) {
+        final error = data['error'] as String? ?? '';
+        if (error == 'authorization_pending') {
+          return DeviceCodePollResult.pending();
+        }
+        if (error == 'slow_down') {
+          return DeviceCodePollResult.pending(slowDown: true);
+        }
+        if (error == 'expired_token') {
+          return DeviceCodePollResult.expired();
+        }
+        return DeviceCodePollResult.error(
+          data['error_description'] as String? ?? error,
+        );
+      }
+
+      if (response.statusCode != null &&
+          response.statusCode! >= 200 &&
+          response.statusCode! < 300) {
+        final oauthToken = OAuthTokenResponse.fromJson(data);
+        if (oauthToken.accessToken.isEmpty) {
+          return DeviceCodePollResult.error('Missing access_token');
+        }
+
+        final token = oauthToken.toAuthToken();
+        await _persistSession(
+          AuthSession(serverAddress: session.serverAddress, token: token),
+        );
+        return DeviceCodePollResult.complete(token);
+      }
+
+      return DeviceCodePollResult.error(
+        'Unexpected status ${response.statusCode}',
+      );
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
   }
 
   /// 一键 OAuth 登录：loopback 本地 HTML 回调 + 浏览器授权

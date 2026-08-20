@@ -9,4 +9,5 @@ export 'src/oauth/oauth_config.dart';
 export 'src/oauth/oauth_redirect_handler.dart';
 export 'src/oauth/oauth_redirect_transport.dart';
 export 'src/oauth/oauth_session.dart';
+export 'src/oauth/oauth_device_code.dart';
 export 'src/oauth/loopback_redirect_server.dart';

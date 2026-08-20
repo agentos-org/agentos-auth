@@ -15,6 +15,7 @@ class OAuthConfig {
     this.scopes = OAuthDefaults.scopes,
     this.authorizePath = OAuthDefaults.authorizePath,
     this.tokenPath = OAuthDefaults.tokenPath,
+    this.deviceAuthorizationPath = OAuthDefaults.deviceAuthorizationPath,
     this.logoutPath = OAuthDefaults.logoutPath,
     this.revokePath = OAuthDefaults.revokePath,
     this.authorizationPrompt = OAuthDefaults.authorizationPrompt,
@@ -34,6 +35,7 @@ class OAuthConfig {
   final List<String> scopes;
   final String authorizePath;
   final String tokenPath;
+  final String deviceAuthorizationPath;
   final String logoutPath;
   final String revokePath;
 
@@ -193,6 +195,7 @@ abstract final class OAuthDefaults {
 
   static const String authorizePath = '/oauth2/authorize';
   static const String tokenPath = '/oauth2/token';
+  static const String deviceAuthorizationPath = '/oauth2/device_authorization';
   static const String revokePath = '/oauth2/revoke';
 
   static const String userInfoPath = '/api/v1/auth/user/info';
