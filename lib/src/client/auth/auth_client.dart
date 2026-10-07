@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:path/path.dart' as path;
 
 import '../../models/auth_session.dart';
@@ -34,14 +35,19 @@ class AuthClient {
     ApiClient? apiClient,
     TokenStorage? tokenStorage,
     String? storagePath,
+    bool Function(X509Certificate certificate, String host, int port)?
+        badCertificateCallback,
   })  : _apiClient = apiClient ?? ApiClient(),
         _tokenStorage = tokenStorage ??
             DefaultTokenStorage(
               storagePath: storagePath ?? _getDefaultTokenStoragePath(),
-            );
+            ),
+        _badCertificateCallback = badCertificateCallback;
 
   final ApiClient _apiClient;
   final TokenStorage? _tokenStorage;
+  final bool Function(X509Certificate certificate, String host, int port)?
+      _badCertificateCallback;
 
   AuthToken? _currentToken;
   String? _currentServerAddress;
@@ -159,7 +165,7 @@ class AuthClient {
     final normalizedServer = _normalizeServerAddress(serverAddress);
 
     try {
-      final dio = Dio(BaseOptions(
+      final dio = _createDio(BaseOptions(
         baseUrl: serverApiBase(normalizedServer),
         connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 30),
@@ -211,7 +217,7 @@ class AuthClient {
     }
 
     try {
-      final dio = Dio(BaseOptions(
+      final dio = _createDio(BaseOptions(
         baseUrl: serverApiBase(session.serverAddress),
         connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 30),
@@ -391,7 +397,7 @@ class AuthClient {
     }
 
     try {
-      final dio = Dio(BaseOptions(
+      final dio = _createDio(BaseOptions(
         baseUrl: serverApiBase(serverAddress),
         connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 30),
@@ -474,7 +480,7 @@ class AuthClient {
     }
 
     try {
-      final dio = Dio(BaseOptions(
+      final dio = _createDio(BaseOptions(
         baseUrl: serverApiBase(serverAddress),
         connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 30),
@@ -509,7 +515,7 @@ class AuthClient {
     required String codeVerifier,
   }) async {
     try {
-      final dio = Dio(BaseOptions(
+      final dio = _createDio(BaseOptions(
         baseUrl: serverApiBase(serverAddress),
         connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 30),
@@ -540,6 +546,22 @@ class AuthClient {
     } on DioException catch (e) {
       throw _handleError(e);
     }
+  }
+
+  Dio _createDio(BaseOptions options) {
+    final dio = Dio(options);
+    final callback = _badCertificateCallback;
+    if (callback == null) return dio;
+    dio.options.followRedirects = false;
+
+    dio.httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () {
+        final client = HttpClient();
+        client.badCertificateCallback = callback;
+        return client;
+      },
+    );
+    return dio;
   }
 
   void _applySession(AuthSession session) {
