@@ -1,7 +1,7 @@
 import 'oauth_config.dart';
 import '../models/token.dart';
 
-/// Device Code 授权会话（RFC 8628）
+/// Device Code authorization session (RFC 8628)
 class DeviceCodeSession {
   DeviceCodeSession({
     required this.serverAddress,
@@ -46,7 +46,7 @@ class DeviceCodeSession {
   }
 }
 
-/// Device Code 轮询结果状态
+/// Device Code polling result status
 enum DeviceCodePollStatus {
   pending,
   complete,
@@ -54,7 +54,7 @@ enum DeviceCodePollStatus {
   error,
 }
 
-/// Device Code 轮询结果
+/// Device Code polling result
 class DeviceCodePollResult {
   const DeviceCodePollResult._({
     required this.status,

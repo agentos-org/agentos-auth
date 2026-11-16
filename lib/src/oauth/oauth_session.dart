@@ -1,6 +1,6 @@
 import 'oauth_config.dart';
 
-/// 一次 OAuth 登录流程的临时上下文（仅内存保存）
+/// Temporary context of one OAuth login flow (kept in memory only)
 class OAuthLoginSession {
   OAuthLoginSession({
     required this.serverAddress,

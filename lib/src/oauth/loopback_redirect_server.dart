@@ -3,16 +3,16 @@ import 'dart:io';
 
 import 'oauth_config.dart';
 
-/// Loopback 回调模式
+/// Loopback callback mode
 enum LoopbackMode {
-  /// OAuth 登录：必须有 `code`
+  /// OAuth login: `code` is required
   oauthLogin,
 
-  /// 远端登出回跳：任意访问 callback 路径即视为完成
+  /// Remote logout redirect: any visit to the callback path counts as completed
   postLogout,
 }
 
-/// 固定端口的 loopback OAuth 回调服务
+/// Loopback OAuth callback server on a fixed port
 class LoopbackRedirectServer {
   LoopbackRedirectServer({
     this.host = OAuthDefaults.redirectHost,
@@ -48,7 +48,7 @@ class LoopbackRedirectServer {
 
   bool get isRunning => _server != null;
 
-  /// 释放固定端口，避免登录/登出流程互相占用 `53682`
+  /// Release the fixed port so the login and logout flows do not occupy `53682` at the same time
   static Future<void> releasePort() async {
     await _portHolder?.stop();
     _portHolder = null;

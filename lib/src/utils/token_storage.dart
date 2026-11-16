@@ -25,7 +25,7 @@ String _deobfuscate(String cipher) {
   return String.fromCharCodes(result);
 }
 
-/// 认证会话存储接口
+/// Authentication session storage interface
 abstract class TokenStorage {
   Future<void> saveSession(AuthSession session);
   Future<AuthSession?> loadSession();
@@ -33,7 +33,7 @@ abstract class TokenStorage {
   Future<bool> hasSession();
 }
 
-/// 默认实现：混淆 JSON 文件
+/// Default implementation: obfuscated JSON file
 class DefaultTokenStorage implements TokenStorage {
   DefaultTokenStorage({required this.storagePath});
 

@@ -1,15 +1,15 @@
 import 'dart:async';
 
-/// 自定义 Scheme 回调通道（由桌面端注入，如 `agentos://oauth/callback`）
+/// Custom-scheme callback channel (injected by the desktop app, e.g. `agentos://oauth/callback`)
 abstract class OAuthRedirectHandler {
-  /// 等待浏览器回跳到已注册的 redirect_uri
+  /// Wait for the browser to redirect back to the registered redirect_uri
   Future<Uri> waitForRedirect({required Duration timeout});
 
-  /// 取消等待（如用户关闭登录弹窗）
+  /// Cancel waiting (e.g. the user closed the login dialog)
   Future<void> cancel();
 }
 
-/// 内存实现，供测试或示例使用
+/// In-memory implementation for tests or examples
 class InMemoryOAuthRedirectHandler implements OAuthRedirectHandler {
   Completer<Uri>? _completer;
   Timer? _timeoutTimer;
@@ -40,7 +40,7 @@ class InMemoryOAuthRedirectHandler implements OAuthRedirectHandler {
     return _completer!.future;
   }
 
-  /// 模拟系统唤起应用并传入回调 URI
+  /// Simulate the system launching the app with the callback URI
   void deliver(Uri uri) {
     final completer = _completer;
     if (completer == null || completer.isCompleted) return;

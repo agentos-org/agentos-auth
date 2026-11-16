@@ -3,10 +3,10 @@ import 'dart:io';
 import 'package:agentos_auth/agentos_auth.dart';
 import 'package:path/path.dart' as path;
 
-/// 改这里为你的 AgentOS 服务器地址（不含 `/agentos-server` 后缀）
+/// Change this to your AgentOS server address (without the `/agentos-server` suffix)
 const _serverAddress = 'https://your-server.example.com';
 
-/// 本地快速验证 OAuth 登录 / 刷新 / 登出。
+/// Quickly verify OAuth login / refresh / logout locally.
 ///
 /// ```bash
 /// cd agentos-auth

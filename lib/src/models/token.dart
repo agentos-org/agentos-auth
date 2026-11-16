@@ -1,21 +1,21 @@
-/// 认证 Token 信息
+/// Authentication token information
 class AuthToken {
   /// Access Token
   final String accessToken;
 
-  /// Refresh Token（OAuth2）
+  /// Refresh token (OAuth2)
   final String? refreshToken;
 
-  /// ID Token（OIDC，可选）
+  /// ID token (OIDC, optional)
   final String? idToken;
 
-  /// Token 类型（通常是 "Bearer"）
+  /// Token type (usually "Bearer")
   final String tokenType;
 
-  /// 创建时间
+  /// Creation time
   final DateTime createdAt;
 
-  /// 过期时间（OAuth2 expires_in 换算）
+  /// Expiration time (converted from OAuth2 expires_in)
   final DateTime? expiresAt;
 
   AuthToken({
@@ -55,7 +55,7 @@ class AuthToken {
         if (expiresAt != null) 'expiresAt': expiresAt!.toIso8601String(),
       };
 
-  /// 是否已过期（提前 60 秒视为过期，便于主动刷新）
+  /// Whether the token has expired (treated as expired 60 seconds early so it can be refreshed proactively)
   bool get isExpired {
     if (expiresAt == null) return false;
     return DateTime.now().isAfter(

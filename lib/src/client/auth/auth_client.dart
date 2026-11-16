@@ -29,7 +29,7 @@ String _getDefaultTokenStoragePath() {
 String _normalizeServerAddress(String serverAddress) =>
     trimServerAddress(serverAddress);
 
-/// OAuth2 认证客户端（Authorization Code + PKCE / Device Code）
+/// OAuth2 authentication client (Authorization Code + PKCE / Device Code)
 class AuthClient {
   AuthClient({
     ApiClient? apiClient,
@@ -60,7 +60,7 @@ class AuthClient {
   bool get isAuthenticated =>
       _currentToken != null && _currentServerAddress != null;
 
-  /// 从本地恢复会话
+  /// Restore the session from local storage
   Future<void> initialize({String? serverAddress}) async {
     final session = await _tokenStorage?.loadSession();
     if (session != null) {
@@ -73,7 +73,7 @@ class AuthClient {
     }
   }
 
-  /// 准备 OAuth 授权（生成 PKCE / state / 授权 URL）
+  /// Prepare the OAuth authorization (generates PKCE / state / authorization URL)
   OAuthLoginSession beginOAuthLogin({
     required String serverAddress,
     OAuthConfig config = const OAuthConfig(),
@@ -111,7 +111,7 @@ class AuthClient {
     );
   }
 
-  /// 处理 loopback 回调并换取 token
+  /// Handle the loopback callback and exchange it for a token
   Future<AuthToken> completeOAuthLogin({
     required OAuthLoginSession session,
     required Uri callbackUri,
@@ -140,7 +140,7 @@ class AuthClient {
     return token;
   }
 
-  /// 取消进行中的 OAuth 登录
+  /// Cancel an in-progress OAuth login
   Future<void> cancelOAuthLogin() async {
     _oauthLoginCancelled = true;
     final handler = _activeOAuthRedirectHandler;
@@ -153,10 +153,10 @@ class AuthClient {
     await LoopbackRedirectServer.releasePort();
   }
 
-  /// 发起 Device Code 授权（RFC 8628）
+  /// Start Device Code authorization (RFC 8628)
   ///
-  /// 默认不传 `scope`，由认证中心按 client 已登记权限处理；
-  /// 需要显式申请时可设 [includeScope] 为 true。
+  /// `scope` is not sent by default, so the auth center applies the permissions registered for the client;
+  /// set [includeScope] to true when the scope must be requested explicitly.
   Future<DeviceCodeSession> beginDeviceCodeLogin({
     required String serverAddress,
     OAuthConfig config = const OAuthConfig(),
@@ -208,7 +208,7 @@ class AuthClient {
     }
   }
 
-  /// 轮询 Device Code 授权状态；成功时会持久化会话
+  /// Poll the Device Code authorization status; the session is persisted on success
   Future<DeviceCodePollResult> pollDeviceCode({
     required DeviceCodeSession session,
   }) async {
@@ -280,7 +280,7 @@ class AuthClient {
     }
   }
 
-  /// 一键 OAuth 登录：loopback 本地 HTML 回调 + 浏览器授权
+  /// One-step OAuth login: loopback local HTML callback + browser authorization
   Future<AuthToken> loginWithOAuth({
     required String serverAddress,
     required Future<void> Function(String authorizationUrl) openAuthorizationUrl,
@@ -381,7 +381,7 @@ class AuthClient {
     }
   }
 
-  /// 使用 refresh_token 刷新 access_token
+  /// Refresh the access_token using the refresh_token
   Future<AuthToken> refreshToken({
     OAuthConfig config = const OAuthConfig(),
   }) async {
@@ -435,11 +435,11 @@ class AuthClient {
     }
   }
 
-  /// 登出：请求服务端撤销 Token，并清除本地会话
+  /// Log out: ask the server to revoke the token and clear the local session
   ///
-  /// `GET /api/v1/auth/logout`，建议携带 `Authorization: Bearer <access_token>`。
-  /// 服务端会撤销 access / refresh token；未携带或 token 无效时仍可能返回成功，
-  /// 但已签发的 token 不保证立即失效。
+  /// `GET /api/v1/auth/logout`; sending `Authorization: Bearer <access_token>` is recommended.
+  /// The server revokes the access / refresh token; it may still return success when no token is sent or the token is invalid,
+  /// but an already issued token is not guaranteed to become invalid immediately.
   Future<void> logout({OAuthConfig config = const OAuthConfig()}) async {
     final token = _currentToken;
     final serverAddress = _currentServerAddress;
@@ -460,7 +460,7 @@ class AuthClient {
     await logoutLocal();
   }
 
-  /// 本地登出：仅清除本机会话与 Token 存储
+  /// Local logout: only clears the local session and token storage
   Future<void> logoutLocal() async {
     _currentToken = null;
     _currentServerAddress = null;
@@ -468,7 +468,7 @@ class AuthClient {
     await _tokenStorage?.clearSession();
   }
 
-  /// 请求服务端登出
+  /// Request a server-side logout
   Future<void> _requestServerLogout({
     required String serverAddress,
     String? accessToken,
@@ -631,7 +631,7 @@ class AuthClient {
   }
 }
 
-/// 用户主动取消 OAuth 登录（如关闭登录弹窗）
+/// The user cancelled the OAuth login (e.g. closed the login dialog)
 class OAuthLoginCancelledException implements Exception {
   const OAuthLoginCancelledException();
 

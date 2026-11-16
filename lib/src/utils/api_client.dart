@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 
-/// 基础 HTTP 客户端
+/// Base HTTP client
 class ApiClient {
   ApiClient({
     Dio? dio,
@@ -24,7 +24,7 @@ class ApiClient {
 
   Dio get dio => _dio;
 
-  /// 设置认证 Token
+  /// Set the authentication token
   void setAuthToken(String? token) {
     if (token != null) {
       _dio.options.headers['Authorization'] = 'Bearer $token';
@@ -33,7 +33,7 @@ class ApiClient {
     }
   }
 
-  /// 清除认证 Token
+  /// Clear the authentication token
   void clearAuthToken() {
     _dio.options.headers.remove('Authorization');
   }

@@ -3,11 +3,11 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 
-/// PKCE 工具（S256）
+/// PKCE utilities (S256)
 abstract final class Pkce {
   static final _random = Random.secure();
 
-  /// 生成 code_verifier（43–128 字符）
+  /// Generate a code_verifier (43-128 characters)
   static String generateVerifier({int length = 64}) {
     const chars =
         'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
@@ -16,7 +16,7 @@ abstract final class Pkce {
         .join();
   }
 
-  /// 生成随机 state
+  /// Generate a random state
   static String generateState({int length = 32}) {
     const chars =
         'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -24,7 +24,7 @@ abstract final class Pkce {
         .join();
   }
 
-  /// BASE64URL(SHA256(verifier))，无 padding
+  /// BASE64URL(SHA256(verifier)), without padding
   static String challengeS256(String verifier) {
     final digest = sha256.convert(utf8.encode(verifier));
     return base64Url.encode(digest.bytes).replaceAll('=', '');

@@ -1,6 +1,6 @@
 import 'oauth_redirect_transport.dart';
 
-/// OAuth2 客户端配置（对齐 agentos-server oauth2-develop-guide）
+/// OAuth2 client configuration (aligned with the agentos-server oauth2-develop-guide)
 class OAuthConfig {
   const OAuthConfig({
     this.clientId = OAuthDefaults.clientId,
@@ -39,27 +39,27 @@ class OAuthConfig {
   final String logoutPath;
   final String revokePath;
 
-  /// OIDC `prompt`，桌面端默认 `login` 避免 SSO 静默登录却不回跳
+  /// OIDC `prompt`; defaults to `login` on desktop to avoid a silent SSO login that never redirects back
   final String? authorizationPrompt;
 
-  /// 指定回调方式；默认按当前平台自动选择
+  /// Specifies the callback mode; by default it is chosen automatically for the current platform
   final OAuthRedirectTransport? redirectTransport;
 
-  /// WebShell 等场景使用的固定 redirect_uri（须事先在认证中心登记）
+  /// Fixed redirect_uri used by scenarios such as WebShell (must be registered in the auth center beforehand)
   final Uri? redirectUriOverride;
 
   OAuthRedirectTransport get resolvedRedirectTransport =>
       redirectTransport ?? OAuthRedirectTransportResolver.forPlatform();
 
-  /// 当前平台使用的 OAuth redirect_uri
+  /// OAuth redirect_uri used on the current platform
   Uri get redirectUri =>
       redirectUriOverride ?? redirectUriFor(resolvedRedirectTransport);
 
-  /// 远端登出回跳地址（与 [redirectUri] 同平台策略）
+  /// Redirect address after remote logout (same platform strategy as [redirectUri])
   Uri get postLogoutRedirectUri =>
       postLogoutRedirectUriFor(resolvedRedirectTransport);
 
-  /// Loopback redirect_uri（Linux）
+  /// Loopback redirect_uri (Linux)
   Uri get loopbackRedirectUri => Uri(
         scheme: 'http',
         host: redirectHost,
@@ -67,21 +67,21 @@ class OAuthConfig {
         path: redirectPath,
       );
 
-  /// 自定义 Scheme 登录回调（macOS / Windows）`agentos://oauth/callback`
+  /// Custom-scheme login callback (macOS / Windows) `agentos://oauth/callback`
   Uri get schemeRedirectUri => Uri(
         scheme: customScheme,
         host: schemeHost,
         path: schemeCallbackPath,
       );
 
-  /// 自定义 Scheme 登录完成唤起应用 `agentos://oauth/login/success`
+  /// Custom scheme used to wake the app after login completes `agentos://oauth/login/success`
   Uri get schemeLoginSuccessUri => Uri(
         scheme: customScheme,
         host: schemeHost,
         path: schemeLoginSuccessPath,
       );
 
-  /// 自定义 Scheme 登出成功回跳 `agentos://oauth/logout/success`
+  /// Custom-scheme redirect after a successful logout `agentos://oauth/logout/success`
   Uri get schemeLogoutSuccessUri => Uri(
         scheme: customScheme,
         host: schemeHost,
@@ -111,18 +111,18 @@ class OAuthConfig {
     }
   }
 
-  /// 判断 URI 是否为 OAuth 登录回调
+  /// Whether the URI is an OAuth login callback
   bool matchesOAuthCallback(Uri uri) {
     final expected = redirectUri;
     return _sameRedirectTarget(uri, expected);
   }
 
-  /// 判断 URI 是否为唤起 Desktop（loopback 成功页「返回 AgentOS」）
+  /// Whether the URI is used to wake Desktop (the "Back to AgentOS" action on the loopback success page)
   bool matchesForegroundLink(Uri uri) {
     return _sameRedirectTarget(uri, OAuthDefaults.foregroundUri);
   }
 
-  /// 判断 URI 是否为 OAuth 登出回跳
+  /// Whether the URI is an OAuth logout redirect
   bool matchesOAuthLogoutSuccess(Uri uri) {
     final expected = postLogoutRedirectUri;
     return _sameRedirectTarget(uri, expected);
@@ -143,7 +143,7 @@ class OAuthConfig {
   String get scope => scopes.join(' ');
 }
 
-/// 去掉首尾空白与末尾斜杠。
+/// Trim leading/trailing whitespace and trailing slashes.
 String trimServerAddress(String serverAddress) {
   var normalized = serverAddress.trim();
   while (normalized.endsWith('/')) {
@@ -152,13 +152,13 @@ String trimServerAddress(String serverAddress) {
   return normalized;
 }
 
-/// 远端 API 根地址：`{域名}/agentos-server`。
+/// Remote API root address: `{domain}/agentos-server`.
 String serverApiBase(String serverAddress) =>
     '${trimServerAddress(serverAddress)}${OAuthDefaults.serverApiPrefix}';
 
-/// AgentOS Desktop OAuth2 默认值
+/// AgentOS Desktop OAuth2 defaults
 abstract final class OAuthDefaults {
-  /// 远端 API 统一前缀（对齐 agentos-server 网关 context-path）
+  /// Common prefix of the remote API (aligned with the agentos-server gateway context-path)
   static const String serverApiPrefix = '/agentos-server';
 
   static const String clientId = 'agentos-desktop';
@@ -173,14 +173,14 @@ abstract final class OAuthDefaults {
   static const String schemeLoginSuccessPath = '/login/success';
   static const String schemeLogoutSuccessPath = '/logout/success';
 
-  /// 从浏览器成功页唤起 Desktop（登录 / 登出共用）
+  /// Wake Desktop from the browser success page (shared by login / logout)
   static const String foregroundHost = 'open';
 
   static Uri get foregroundUri => Uri(scheme: customScheme, host: foregroundHost);
 
   static String get foregroundDeepLink => foregroundUri.toString();
 
-  /// Loopback 浏览器展示用完成页（无敏感 query 参数）
+  /// Completion page shown in the loopback browser (no sensitive query parameters)
   static const String loginSuccessPath = '/oauth/login/success';
   static const String logoutSuccessPath = '/oauth/logout/success';
 
@@ -201,6 +201,6 @@ abstract final class OAuthDefaults {
   static const String userInfoPath = '/api/v1/auth/user/info';
   static const String logoutPath = '/api/v1/auth/logout';
 
-  /// 每次授权都要求重新认证，避免浏览器 SSO 会话导致只登录不回跳
+  /// Require re-authentication on every authorization, so a browser SSO session cannot cause a login without a redirect back
   static const String authorizationPrompt = 'login';
 }

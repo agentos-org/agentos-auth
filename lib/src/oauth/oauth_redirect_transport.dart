@@ -1,15 +1,15 @@
-/// OAuth 回调承载方式
+/// OAuth callback transport
 enum OAuthRedirectTransport {
-  /// 自定义 URL Scheme（可选，当前默认未启用）
+  /// Custom URL scheme (optional, currently disabled by default)
   customScheme,
 
-  /// Loopback HTTP + 本地 HTML 成功页
+  /// Loopback HTTP + local HTML success page
   loopback,
 }
 
-/// 选择 OAuth 回调方式
+/// Choose the OAuth callback mode
 abstract final class OAuthRedirectTransportResolver {
-  /// 默认全平台使用 loopback 本地 HTML 回调
+  /// Use the loopback local HTML callback on all platforms by default
   static OAuthRedirectTransport forPlatform() {
     return OAuthRedirectTransport.loopback;
   }

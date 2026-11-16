@@ -1,4 +1,4 @@
-// AgentOS OAuth2 认证 SDK
+// AgentOS OAuth2 authentication SDK
 
 export 'src/models/auth_session.dart';
 export 'src/models/token.dart';

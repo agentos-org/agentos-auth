@@ -1,6 +1,6 @@
 import 'token.dart';
 
-/// 持久化的认证会话
+/// Persisted authentication session
 class AuthSession {
   const AuthSession({
     required this.serverAddress,

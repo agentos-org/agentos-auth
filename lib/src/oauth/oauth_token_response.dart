@@ -1,6 +1,6 @@
 import '../models/token.dart';
 
-/// 标准 OAuth2 token 端点响应
+/// Standard OAuth2 token endpoint response
 class OAuthTokenResponse {
   OAuthTokenResponse({
     required this.accessToken,
