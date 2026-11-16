@@ -3,7 +3,7 @@ description: AgentOS 用户认证 SDK，提供登录、注册、Token 管理等�
 version: 1.0.0
 
 environment:
-  sdk: ^3.9.0
+  sdk: ^3.13.0
 
 dependencies:
   crypto: ^3.0.0
