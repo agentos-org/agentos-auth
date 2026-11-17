@@ -1,139 +1,80 @@
-# agentos-auth
+# agentos_auth
 
-AgentOS OAuth2 认证 SDK，面向原生客户端，提供两种登录方式：
+[中文文档](README-zh_CN.md)
 
-| 场景 | 流程 | 典型终端 |
-|------|------|----------|
-| 固定回调可用 | **Authorization Code + PKCE**（Loopback / 自定义 Scheme） | Desktop |
-| 无固定 `redirect_uri`（如 LAN IP 会变） | **Device Code**（RFC 8628） | Embedded / WebShell |
+OAuth2 authentication SDK for AgentOS native clients. It supports two sign-in flows:
 
-并提供 Token 刷新与登出。两种流程共用同一 `AuthClient`、会话模型与存储；由应用层选择调用哪套 API。
+| Scenario | Flow | Typical client |
+|----------|------|----------------|
+| A fixed callback address is available | **Authorization Code + PKCE** (loopback / custom scheme) | Desktop |
+| No fixed `redirect_uri` (for example a LAN IP that changes) | **Device Code** (RFC 8628) | Embedded / WebShell |
 
-## 功能特性
+Both flows share one `AuthClient`, one session model and one token storage, and also provide token refresh and sign-out. The application decides which flow to use.
 
-- **Authorization Code + PKCE（S256）**：无 `client_secret`；默认 Loopback 本地 HTML 回调
-- **Device Code**：设备发起授权 → 用户在浏览器确认 → 客户端轮询换 Token；默认**不传 `scope`**（避免认证中心 `invalid_scope`）
-- **会话持久化**：内存缓存 + 可配置本地存储（`serverAddress` + Token）
-- **自动恢复**：应用启动时从本地恢复登录状态
-- **刷新 Token**：使用 `refresh_token` 换取新的 `access_token`
-- **取消登录（Redirect 流）**：`cancelOAuthLogin()` 关闭 loopback 并中止等待
-- **两种登出**：
-  - **登出** `logout()`：`GET /api/v1/auth/logout` 撤销服务端 Token → 清本地
-  - **仅本地** `logoutLocal()`：不请求服务端，只清除本机会话
+## Features
 
-> 业务 API（如用户信息、模型列表）不在本 SDK 范围内，由应用层或独立 API 包调用。
+- **Authorization Code + PKCE (S256)**: no `client_secret`; a loopback HTTP server with a local HTML page handles the callback by default.
+- **Device Code**: the device starts the authorization, the user confirms in a browser, and the client polls for the token. `scope` is **not sent by default** to avoid `invalid_scope` errors from the authorization server.
+- **Session persistence**: in-memory cache plus configurable local storage (`serverAddress` + token).
+- **Session restore**: restore the signed-in state from local storage when the app starts.
+- **Token refresh**: exchange a `refresh_token` for a new `access_token`.
+- **Cancel sign-in (redirect flow)**: `cancelOAuthLogin()` closes the loopback server and aborts the wait.
+- **Two sign-out modes**:
+  - `logout()` calls `GET /api/v1/auth/logout` to revoke the server-side tokens, then clears local state.
+  - `logoutLocal()` only clears the local session without calling the server.
 
-## 服务端接口（对齐 agentos-server）
+> Business APIs (user profile, model lists, ...) are out of scope for this SDK. Call them from your application or from a separate API package.
 
-配置纯服务器域名，不含路径前缀与末尾斜杠，例如：
+## Installation
+
+```yaml
+dependencies:
+  agentos_auth: ^1.0.0
+```
+
+```bash
+dart pub get
+```
+
+Requirements: Dart SDK `^3.13.0`.
+
+## Server endpoints
+
+Configure the plain server origin, without a path prefix or trailing slash:
 
 ```text
 https://your-server.example.com
 ```
 
-不要填写 `/agentos-server`；SDK 请求时会自动拼到 `{域名}/agentos-server` 下：
+Do not append `/agentos-server`; the SDK adds it automatically:
 
-| 用途 | 方法 | 路径 |
-|------|------|------|
-| 授权页（Redirect 流） | GET（浏览器打开） | `/agentos-server/oauth2/authorize` |
-| Device Authorization | POST | `/agentos-server/oauth2/device_authorization` |
-| 换 Token / 刷新 / Device Code 轮询 | POST | `/agentos-server/oauth2/token` |
-| 撤销 Token | POST | `/agentos-server/oauth2/revoke` |
-| 登出 | GET | `/agentos-server/api/v1/auth/logout` |
+| Purpose | Method | Path |
+|---------|--------|------|
+| Authorization page (redirect flow) | GET (opened in a browser) | `/agentos-server/oauth2/authorize` |
+| Device authorization | POST | `/agentos-server/oauth2/device_authorization` |
+| Token exchange / refresh / device-code polling | POST | `/agentos-server/oauth2/token` |
+| Token revocation | POST | `/agentos-server/oauth2/revoke` |
+| Sign-out | GET | `/agentos-server/api/v1/auth/logout` |
 
-### 默认 OAuth 客户端
+### Default OAuth client
 
-| 配置项 | 默认值 |
-|--------|--------|
+| Setting | Default |
+|---------|---------|
 | `client_id` | `agentos-desktop` |
-| `redirect_uri`（仅 Redirect 流） | `http://127.0.0.1:53682/oauth/callback` |
-| `scope`（Redirect 流默认带上） | `openid profile email phone agentos.read agentos.write` |
-| `prompt`（Redirect 流） | `login`（每次授权要求重新认证） |
-| Device Authorization 路径 | `/oauth2/device_authorization` |
+| `redirect_uri` (redirect flow only) | `http://127.0.0.1:53682/oauth/callback` |
+| `scope` (sent by the redirect flow) | `openid profile email phone agentos.read agentos.write` |
+| `prompt` (redirect flow) | `login` (re-authentication is required every time) |
+| Device authorization path | `/oauth2/device_authorization` |
 
-可通过 `OAuthConfig` 覆盖 `clientId`、回调地址、scope、`deviceAuthorizationPath` 等。
+Override `clientId`, the redirect address, the scope, `deviceAuthorizationPath` and more through `OAuthConfig`.
 
-### 后端需登记的 redirect 地址（仅 Redirect 流）
+The authorization server must register this redirect URI for the redirect flow: `http://127.0.0.1:53682/oauth/callback`. The device-code flow does **not** need a fixed `redirect_uri`.
 
-| 用途 | URL |
-|------|-----|
-| OAuth 登录回调 | `http://127.0.0.1:53682/oauth/callback` |
+For sign-out, send `Authorization: Bearer <access_token>`. With a valid token the server revokes the access and refresh tokens; without one (or with an invalid one) the call still succeeds but already issued tokens may not be revoked.
 
-Device Code 流**不依赖**固定 `redirect_uri`，适合 Embedded / LAN。
+## Flow 1: Authorization Code + PKCE (Desktop)
 
-登出接口建议请求头：`Authorization: Bearer <access_token>`。携带有效 token 时，服务端会撤销 access / refresh token 并清理授权记录；未携带或 token 无效时仍返回成功，但可能不会撤销已签发 token。
-
----
-
-## 流程一：Authorization Code + PKCE（Desktop）
-
-### 授权（浏览器）
-
-```text
-GET /agentos-server/oauth2/authorize
-  ?response_type=code
-  &client_id=agentos-desktop
-  &redirect_uri=http://127.0.0.1:53682/oauth/callback
-  &scope=openid profile email ...
-  &state={state}
-  &code_challenge={S256}
-  &code_challenge_method=S256
-  &prompt=login
-```
-
-### 换 Token / 刷新
-
-```text
-POST /agentos-server/oauth2/token
-Content-Type: application/x-www-form-urlencoded
-
-# 授权码换 Token
-grant_type=authorization_code
-&client_id=agentos-desktop
-&code={code}
-&redirect_uri=http://127.0.0.1:53682/oauth/callback
-&code_verifier={verifier}
-
-# 刷新
-grant_type=refresh_token
-&client_id=agentos-desktop
-&refresh_token={refresh_token}
-```
-
-响应字段（节选）：`access_token`、`refresh_token`、`expires_in`、`token_type`。
-
-### Loopback 与浏览器成功页
-
-默认全平台使用 **loopback + 本地 HTML**（`OAuthRedirectTransport.loopback`）。
-
-```text
-App                 Loopback :53682              Browser           AgentOS Server
- |                        |                        |                      |
- |-- start loopback ----->|                        |                      |
- |-- open authorize URL -------------------------->|                      |
- |                        |                        |-- /agentos-server/oauth2/authorize ->|
- |                        |<-- /oauth/callback?code=... -------------------|
- |<-- 收到 code，换 token -|                        |                      |
- |                        |-- 302 /oauth/login/success ------------------>|
- |                        |                        |   （展示成功页）      |
-```
-
-要点：
-
-1. SDK 在 **`/oauth/callback` 收到 `code` 时即完成登录**，不等待用户操作成功页
-2. 浏览器随后 302 到 **`/oauth/login/success`**，地址栏不含 `code` / `state`
-3. 成功页提供两个按钮：
-   - **返回 AgentOS**：跳转 `agentos://open`（由 Desktop 唤起应用，需应用注册该 scheme）
-   - **关闭标签页**：手动 `window.close()`
-4. **无自动关闭倒计时**
-
-| 路径 | 说明 |
-|------|------|
-| `/oauth/callback` | OAuth `redirect_uri`，带 `code` / `state` |
-| `/oauth/login/success` | 登录成功 HTML 页 |
-| `/oauth/logout/success` | 登出成功 HTML 页 |
-
-### 一键登录（推荐）
+### One-call sign-in (recommended)
 
 ```dart
 import 'dart:io';
@@ -146,7 +87,7 @@ Future<void> main() async {
   await client.initialize(serverAddress: serverAddress);
 
   if (client.isAuthenticated) {
-    print('已恢复会话');
+    print('Session restored');
     return;
   }
 
@@ -163,74 +104,57 @@ Future<void> main() async {
     },
   );
 
-  print('登录成功: ${token.accessToken}');
+  print('Signed in: ${token.accessToken}');
 }
 ```
 
-`loginWithOAuth` 内部会：
+`loginWithOAuth` will:
 
-1. 生成 PKCE / state，拼授权 URL（含 `prompt=login`）
-2. 在 `127.0.0.1:53682` 启动 loopback
-3. 打开浏览器授权
-4. 等待 `/oauth/callback?code=...`，换取 Token 并持久化
+1. Generate the PKCE verifier and `state`, and build the authorization URL (including `prompt=login`).
+2. Start a loopback server on `127.0.0.1:53682`.
+3. Open the browser for authorization.
+4. Wait for `/oauth/callback?code=...`, exchange the code for a token and persist the session.
 
-### 取消登录
+### Loopback callback and browser success page
+
+All platforms use **loopback + a local HTML page** by default (`OAuthRedirectTransport.loopback`).
+
+1. The SDK completes the sign-in as soon as `/oauth/callback` receives the `code`; it does not wait for the user to interact with the success page.
+2. The browser is then redirected (302) to `/oauth/login/success`, whose address bar contains neither `code` nor `state`.
+3. The success page offers two buttons: **Back to AgentOS** (opens `agentos://open`, which requires the app to register that scheme) and **Close tab** (`window.close()`). There is no automatic close countdown.
+
+| Path | Description |
+|------|-------------|
+| `/oauth/callback` | OAuth `redirect_uri`, carries `code` / `state` |
+| `/oauth/login/success` | Sign-in success HTML page |
+| `/oauth/logout/success` | Sign-out success HTML page |
+
+### Cancel sign-in
 
 ```dart
 await client.cancelOAuthLogin();
 ```
 
-等待授权过程中可调用，会关闭 loopback 并抛出 `OAuthLoginCancelledException`。
+Call it while waiting for authorization. It closes the loopback server and throws `OAuthLoginCancelledException`.
 
-### 分步登录
+### Step-by-step sign-in
 
 ```dart
 final session = client.beginOAuthLogin(serverAddress: serverAddress);
-// 自行打开 session.authorizationUrl，并拿到回调 Uri
+// Open session.authorizationUrl yourself and obtain the callback Uri.
 final token = await client.completeOAuthLogin(
   session: session,
   callbackUri: callbackUri,
 );
 ```
 
-### 可选：自定义 Scheme 回调
+### Optional: custom-scheme callback
 
-SDK 保留 `OAuthRedirectTransport.customScheme` 与 `OAuthRedirectHandler`，可将 `redirect_uri` 设为 `agentos://oauth/callback`。当前 **默认未启用**，Desktop 使用 loopback。
+The SDK keeps `OAuthRedirectTransport.customScheme` and `OAuthRedirectHandler`, so `redirect_uri` can be set to `agentos://oauth/callback`. It is **not enabled by default**; Desktop uses loopback.
 
-成功页上的「返回 AgentOS」按钮会跳转 `agentos://open`，用于从浏览器手动唤起应用（需 Desktop 注册 `agentos://` scheme）。
+## Flow 2: Device Code (Embedded / LAN)
 
----
-
-## 流程二：Device Code（Embedded / LAN）
-
-适用于无法使用固定 `redirect_uri` 的环境（例如设备通过局域网 IP 访问，地址会变）。
-
-### Device Authorization
-
-```text
-POST /agentos-server/oauth2/device_authorization
-Content-Type: application/x-www-form-urlencoded
-
-client_id=agentos-desktop
-# 默认不传 scope；需要时 AuthClient.beginDeviceCodeLogin(includeScope: true)
-```
-
-响应字段（节选）：`device_code`、`user_code`、`verification_uri`、`verification_uri_complete`、`expires_in`、`interval`。
-
-### 轮询换 Token
-
-```text
-POST /agentos-server/oauth2/token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=urn:ietf:params:oauth:grant-type:device_code
-&client_id=agentos-desktop
-&device_code={device_code}
-```
-
-常见错误码：`authorization_pending`、`slow_down`、`expired_token`。
-
-### 使用示例
+Use it where a fixed `redirect_uri` is impossible, for example when a device is reached through a LAN IP that can change.
 
 ```dart
 final client = AuthClient();
@@ -238,10 +162,10 @@ await client.initialize(serverAddress: serverAddress);
 
 final session = await client.beginDeviceCodeLogin(
   serverAddress: serverAddress,
-  config: const OAuthConfig(/* 可覆盖 clientId 等 */),
+  config: const OAuthConfig(/* override clientId, ... if needed */),
 );
 
-// 打开 session.verificationUriComplete（或 verificationUri + 展示 user_code）
+// Open session.verificationUriComplete (or verificationUri and show user_code).
 await openUrl(session.verificationUriComplete);
 
 var interval = Duration(seconds: session.interval);
@@ -251,11 +175,11 @@ while (!session.isExpired) {
 
   switch (result.status) {
     case DeviceCodePollStatus.complete:
-      print('登录成功: ${result.token!.accessToken}');
+      print('Signed in: ${result.token!.accessToken}');
       return;
     case DeviceCodePollStatus.pending:
       if (result.slowDown) {
-        interval += const Duration(seconds: 5); // 建议上限约 30s
+        interval += const Duration(seconds: 5); // keep it below ~30s
       }
       break;
     case DeviceCodePollStatus.expired:
@@ -265,89 +189,31 @@ while (!session.isExpired) {
 }
 ```
 
-要点：
+Notes:
 
-1. **默认不传 `scope`**；若认证中心要求显式 scope，设 `includeScope: true`
-2. 轮询间隔以服务端返回的 `interval` 为准；收到 `slow_down` 时应加大间隔
-3. 成功时 `pollDeviceCode` 会**自动持久化**会话（与 Redirect 流一致）
-4. 若 SaaS 返回的 `verification_uri` 缺端口，由**应用层**按实际 `serverAddress` 改写后再打开浏览器（SDK 原样透传）
+1. `scope` is omitted by default; if your authorization server requires it, call `beginDeviceCodeLogin(includeScope: true)`.
+2. Use the `interval` returned by the server and increase it when `slow_down` is received. Common error codes are `authorization_pending`, `slow_down` and `expired_token`.
+3. On success `pollDeviceCode` persists the session automatically, exactly like the redirect flow.
+4. If the server returns a `verification_uri` without a port, rewrite it in your application according to the real `serverAddress` before opening the browser; the SDK passes it through unchanged.
 
----
-
-## 登出
-
-```text
-GET /agentos-server/api/v1/auth/logout
-Authorization: Bearer <access_token>
-```
-
-响应示例：
-
-```json
-{
-  "code": 200,
-  "msg": "操作成功",
-  "data": null
-}
-```
+## Refresh, sign-out and storage
 
 ```dart
-// 远端登出 + 清本地（推荐）
-await client.logout();
-
-// 仅清本地
-await client.logoutLocal();
-```
-
-## 安装
-
-```yaml
-dependencies:
-  agentos_auth:
-    path: ../agentos-auth
-```
-
-```bash
-dart pub get
-```
-
-## 使用指南（共用）
-
-### 本地调试（example）
-
-在 `agentos-auth` 目录下运行。先修改 `example/example.dart` 顶部的 `_serverAddress` 常量。
-
-```bash
-cd agentos-auth
-dart run example/example.dart
-dart run example/example.dart logout
-```
-
-macOS / Linux / Windows 会尝试自动打开浏览器；失败则打印授权 URL。当前 example 演示的是 **Authorization Code + Loopback** 流。
-
-### 刷新 Token
-
-```dart
+// Refresh the token.
 if (client.currentToken?.isExpired == true) {
   await client.refreshToken();
 }
+
+// Sign out on the server and clear the local session (recommended).
+await client.logout();
+
+// Clear the local session only.
+await client.logoutLocal();
 ```
 
-也可传入自定义 `OAuthConfig`（例如 Embedded 使用不同 `clientId`）：
+`AuthToken.isExpired` reports true 60 seconds before `expiresAt`. `refreshToken` and `logout` accept a custom `OAuthConfig`, for example when an embedded product uses a different `clientId`.
 
-```dart
-await client.refreshToken(config: myConfig);
-```
-
-`AuthToken.isExpired` 在 `expiresAt` 前 60 秒即视为过期。
-
-### 仅内存（不落盘）
-
-```dart
-final client = AuthClient(tokenStorage: null);
-```
-
-### 自定义存储
+By default the session is stored in a JSON file (see below). Pass `storagePath` to change the file location, or pass your own `TokenStorage` implementation, for example to keep the session in memory only or in a system secure store:
 
 ```dart
 class MyTokenStorage implements TokenStorage {
@@ -365,31 +231,43 @@ class MyTokenStorage implements TokenStorage {
 }
 ```
 
-## 架构概览
+Default storage location:
 
-| 模块 | 说明 |
-|------|------|
-| `AuthClient` | OAuth 登录（Redirect / Device Code）、刷新、登出 |
-| `OAuthConfig` / `OAuthDefaults` | 客户端 ID、回调地址、Device Authorization 路径等 |
-| `DeviceCodeSession` / `DeviceCodePollResult` | Device Code 会话与轮询结果 |
-| `LoopbackRedirectServer` | 本地 HTTP 服务 + HTML 成功页（Redirect 流） |
-| `OAuthRedirectTransport` | 回调承载方式（默认 loopback） |
-| `OAuthRedirectHandler` | 可选自定义 Scheme 回调注入 |
-| `Pkce` | PKCE / state |
-| `AuthSession` / `AuthToken` | 会话与 Token 模型 |
-| `TokenStorage` | 持久化抽象 |
+- macOS / Linux: `~/.agentos/auth/session.json`
+- Windows: `%USERPROFILE%\.agentos\auth\session.json` or `%APPDATA%\.agentos\auth\session.json`
 
-### 默认存储位置
+For stricter security requirements, plug a system secure store in through `TokenStorage`.
 
-- macOS / Linux：`~/.agentos/auth/session.json`
-- Windows：`%USERPROFILE%\.agentos\auth\session.json` 或 `%APPDATA%\.agentos\auth\session.json`
+## Architecture
 
-## 注意事项
+| Module | Description |
+|--------|-------------|
+| `AuthClient` | OAuth sign-in (redirect / device code), refresh and sign-out |
+| `OAuthConfig` / `OAuthDefaults` | Client ID, callback address, device authorization path, ... |
+| `DeviceCodeSession` / `DeviceCodePollResult` | Device-code session and polling result |
+| `LoopbackRedirectServer` | Local HTTP server and HTML success pages (redirect flow) |
+| `OAuthRedirectTransport` | How the callback is received (loopback by default) |
+| `OAuthRedirectHandler` | Optional custom-scheme callback injection |
+| `Pkce` | PKCE and `state` generation |
+| `AuthSession` / `AuthToken` | Session and token models |
+| `TokenStorage` | Persistence abstraction |
 
-- 服务器地址由应用层配置，SDK 不做服务发现
-- **选流**：Desktop / 固定回调用 Redirect；Embedded / LAN 用 Device Code，不要混用同一产品入口的两套 UI
-- Redirect：端口 `53682` 被占用时登录失败，需释放或修改 `OAuthConfig.redirectPort` 并与后端登记一致
-- Redirect：登录在收到 `/oauth/callback` 后即完成；应用不应在此时强制抢浏览器焦点，由用户在成功页自行返回
-- Redirect：认证中心登录页须在成功后正确跳回 `/oauth2/authorize`（携带 `redirect` 参数），否则浏览器只显示网站内「登录成功」而 loopback 收不到 `code`
-- Device Code：轮询需处理 `authorization_pending` / `slow_down` / `expired_token`；`scope` 默认省略
-- 更高安全要求时，可通过 `TokenStorage` 接入系统安全存储
+## Try the example
+
+Edit the `_serverAddress` constant at the top of `example/example.dart`, then run:
+
+```bash
+dart run example/example.dart
+dart run example/example.dart logout
+```
+
+macOS, Linux and Windows try to open the browser automatically and print the authorization URL if that fails. The example demonstrates the **Authorization Code + loopback** flow.
+
+## Caveats
+
+- The server address is configured by the application; the SDK does no service discovery.
+- Pick one flow per product entry point: redirect for Desktop / fixed callbacks, device code for Embedded / LAN. Do not mix both UIs.
+- Redirect flow: sign-in fails if port `53682` is occupied; free it, or change `OAuthConfig.redirectPort` and register the same address on the server.
+- Redirect flow: sign-in completes as soon as `/oauth/callback` is reached. The application should not steal browser focus at that moment; the user returns from the success page.
+- Redirect flow: after a successful login the authorization server's login page must redirect back to `/oauth2/authorize` (with the `redirect` parameter). Otherwise the browser only shows the site's own "signed in" page and the loopback server never receives the `code`.
+- Device-code flow: handle `authorization_pending`, `slow_down` and `expired_token` while polling.

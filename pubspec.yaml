@@ -1,6 +1,8 @@
 name: agentos_auth
-description: AgentOS 用户认证 SDK，提供登录、注册、Token 管理等功能。
+description: OAuth2 authentication SDK for AgentOS native clients, with Authorization Code + PKCE, Device Code flow, token refresh and session storage.
 version: 1.0.0
+repository: https://github.com/agentos-org/agentos-auth
+issue_tracker: https://github.com/agentos-org/agentos-auth/issues
 
 environment:
   sdk: ^3.13.0
