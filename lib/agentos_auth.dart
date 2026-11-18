@@ -5,6 +5,7 @@ export 'src/models/token.dart';
 export 'src/utils/token_storage.dart';
 export 'src/utils/api_client.dart';
 export 'src/client/auth/auth_client.dart';
+export 'src/client/auth/auth_exception.dart';
 export 'src/oauth/oauth_config.dart';
 export 'src/oauth/oauth_redirect_handler.dart';
 export 'src/oauth/oauth_redirect_transport.dart';

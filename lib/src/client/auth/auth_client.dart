@@ -17,6 +17,7 @@ import '../../oauth/oauth_token_response.dart';
 import '../../oauth/pkce.dart';
 import '../../utils/api_client.dart';
 import '../../utils/token_storage.dart';
+import 'auth_exception.dart';
 
 String _getDefaultTokenStoragePath() {
   final homeDir = Platform.environment['HOME'] ??
@@ -388,12 +389,18 @@ class AuthClient {
     final token = _currentToken;
     final serverAddress = _currentServerAddress;
     if (token == null || serverAddress == null) {
-      throw Exception('未登录，无法刷新 Token');
+      throw const AuthException(
+        '未登录，无法刷新 Token',
+        type: AuthErrorType.noSession,
+      );
     }
 
     final refreshToken = token.refreshToken;
     if (refreshToken == null || refreshToken.isEmpty) {
-      throw Exception('缺少 refresh_token，请重新登录');
+      throw const AuthException(
+        '缺少 refresh_token，请重新登录',
+        type: AuthErrorType.noSession,
+      );
     }
 
     try {
@@ -415,11 +422,20 @@ class AuthClient {
         },
       );
 
-      final oauthToken = OAuthTokenResponse.fromJson(
-        response.data as Map<String, dynamic>,
-      );
+      final data = response.data;
+      if (data is! Map<String, dynamic>) {
+        throw const AuthException(
+          '刷新 Token 失败：响应格式无效',
+          type: AuthErrorType.server,
+        );
+      }
+
+      final oauthToken = OAuthTokenResponse.fromJson(data);
       if (oauthToken.accessToken.isEmpty) {
-        throw Exception('刷新 Token 失败：响应缺少 access_token');
+        throw const AuthException(
+          '刷新 Token 失败：响应缺少 access_token',
+          type: AuthErrorType.server,
+        );
       }
 
       final refreshed = oauthToken.toAuthToken().copyWith(
@@ -576,58 +592,112 @@ class AuthClient {
     await _tokenStorage?.saveSession(session);
   }
 
-  Exception _handleError(DioException e) {
-    if (e.response != null) {
-      final statusCode = e.response!.statusCode;
-      final data = e.response!.data;
+  /// Converts a Dio failure into an [AuthException], keeping the message text and adding a
+  /// machine readable [AuthErrorType] so callers can decide whether the session is lost.
+  AuthException _handleError(DioException e) {
+    final response = e.response;
+    if (response != null) {
+      final statusCode = response.statusCode;
+      final data = response.data;
 
       String message = '请求失败';
+      String? oauthError;
       if (data is Map<String, dynamic>) {
-        message = data['error_description'] as String? ??
-            data['message'] as String? ??
-            data['msg'] as String? ??
-            data['error'] as String? ??
+        final error = data['error'];
+        if (error is String && error.isNotEmpty) {
+          oauthError = error;
+        }
+        message = _stringField(data, 'error_description') ??
+            _stringField(data, 'message') ??
+            _stringField(data, 'msg') ??
+            oauthError ??
             message;
       } else if (data is String) {
         message = data;
       }
 
+      final String text;
       switch (statusCode) {
         case 401:
-          return Exception('未授权：$message');
+          text = '未授权：$message';
         case 403:
-          return Exception('禁止访问：$message');
+          text = '禁止访问：$message';
         case 404:
-          return Exception('资源不存在：$message');
+          text = '资源不存在：$message';
         case 422:
-          return Exception('请求参数错误：$message');
+          text = '请求参数错误：$message';
         case 500:
-          return Exception('服务器错误：$message');
+          text = '服务器错误：$message';
         default:
-          return Exception('请求失败 ($statusCode)：$message');
+          text = '请求失败 ($statusCode)：$message';
       }
+      return AuthException(
+        text,
+        type: _classifyStatus(statusCode),
+        statusCode: statusCode,
+        oauthError: oauthError,
+      );
     }
 
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
-        return Exception('连接超时，请检查网络连接');
+        return const AuthException(
+          '连接超时，请检查网络连接',
+          type: AuthErrorType.timeout,
+        );
       case DioExceptionType.receiveTimeout:
-        return Exception('接收超时，请检查网络连接');
+        return const AuthException(
+          '接收超时，请检查网络连接',
+          type: AuthErrorType.timeout,
+        );
       case DioExceptionType.sendTimeout:
-        return Exception('发送超时，请检查网络连接');
+        return const AuthException(
+          '发送超时，请检查网络连接',
+          type: AuthErrorType.timeout,
+        );
       case DioExceptionType.connectionError:
         final errorMsg = e.message ?? '无法连接到服务器';
         final requestUri = e.requestOptions.uri.toString();
-        return Exception('连接错误：$errorMsg\n请求地址: $requestUri');
+        return AuthException(
+          '连接错误：$errorMsg\n请求地址: $requestUri',
+          type: AuthErrorType.network,
+        );
       case DioExceptionType.badResponse:
-        return Exception('服务器响应错误');
+        return const AuthException(
+          '服务器响应错误',
+          type: AuthErrorType.server,
+        );
       case DioExceptionType.cancel:
-        return Exception('请求已取消');
+        return const AuthException('请求已取消');
       case DioExceptionType.unknown:
       default:
         final errorMsg = e.message ?? '未知错误';
-        return Exception('网络错误：$errorMsg (类型: ${e.type})');
+        final cause = e.error;
+        return AuthException(
+          '网络错误：$errorMsg (类型: ${e.type})',
+          type: cause is SocketException || cause is HandshakeException
+              ? AuthErrorType.network
+              : AuthErrorType.unknown,
+        );
     }
+  }
+
+  /// HTTP 400 / 401 / 403 mean the server refused the credentials (for a refresh request this is
+  /// `invalid_grant` or a bad client); 408, 429 and 5xx are transient.
+  static AuthErrorType _classifyStatus(int? statusCode) {
+    if (statusCode == null) return AuthErrorType.unknown;
+    if (statusCode == 400 || statusCode == 401 || statusCode == 403) {
+      return AuthErrorType.rejected;
+    }
+    if (statusCode == 408 || statusCode == 429 || statusCode >= 500) {
+      return AuthErrorType.server;
+    }
+    return AuthErrorType.unknown;
+  }
+
+  static String? _stringField(Map<String, dynamic> data, String key) {
+    final value = data[key];
+    return value is String ? value : null;
   }
 }
 
