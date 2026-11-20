@@ -1,6 +1,6 @@
 # agentos_auth
 
-[中文文档](README-zh_CN.md)
+[中文文档](README-zh_CN.md) · [GitHub repository](https://github.com/agentos-org/agentos-auth)
 
 OAuth2 authentication SDK for AgentOS native clients. It supports two sign-in flows:
 
@@ -91,7 +91,7 @@ Future<void> main() async {
     return;
   }
 
-  final token = await client.loginWithOAuth(
+  await client.loginWithOAuth(
     serverAddress: serverAddress,
     openAuthorizationUrl: (url) async {
       if (Platform.isMacOS) {
@@ -104,7 +104,7 @@ Future<void> main() async {
     },
   );
 
-  print('Signed in: ${token.accessToken}');
+  print('Signed in');
 }
 ```
 
@@ -175,7 +175,7 @@ while (!session.isExpired) {
 
   switch (result.status) {
     case DeviceCodePollStatus.complete:
-      print('Signed in: ${result.token!.accessToken}');
+      print('Signed in');
       return;
     case DeviceCodePollStatus.pending:
       if (result.slowDown) {

@@ -36,14 +36,12 @@ class AuthClient {
     ApiClient? apiClient,
     TokenStorage? tokenStorage,
     String? storagePath,
-    bool Function(X509Certificate certificate, String host, int port)?
-        badCertificateCallback,
+    this._badCertificateCallback,
   })  : _apiClient = apiClient ?? ApiClient(),
         _tokenStorage = tokenStorage ??
             DefaultTokenStorage(
               storagePath: storagePath ?? _getDefaultTokenStoragePath(),
-            ),
-        _badCertificateCallback = badCertificateCallback;
+            );
 
   final ApiClient _apiClient;
   final TokenStorage? _tokenStorage;

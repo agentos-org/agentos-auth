@@ -82,16 +82,12 @@ Future<void> _ensureLoggedIn(AuthClient client) async {
   }
 
   print('开始 OAuth 登录，loopback 监听 127.0.0.1:53682 ...');
-  final token = await client.loginWithOAuth(
+  await client.loginWithOAuth(
     serverAddress: _serverAddress,
     openAuthorizationUrl: _openAuthorizationUrl,
   );
 
   print('登录成功。');
-  print('access_token 前缀: ${_preview(token.accessToken)}');
-  if (token.refreshToken != null) {
-    print('refresh_token 前缀: ${_preview(token.refreshToken!)}');
-  }
 }
 
 Future<void> _requireSession(AuthClient client) async {
@@ -105,9 +101,8 @@ Future<void> _requireSession(AuthClient client) async {
 Future<void> _refresh(AuthClient client) async {
   print('请求 POST /oauth2/token (grant_type=refresh_token) ...');
   try {
-    final token = await client.refreshToken();
+    await client.refreshToken();
     print('刷新成功。');
-    print('新 access_token 前缀: ${_preview(token.accessToken)}');
   } catch (e) {
     print('刷新失败: $e');
     exitCode = 1;
@@ -134,10 +129,6 @@ void _printStatus(AuthClient client) {
   final token = client.currentToken!;
   print('状态: 已登录');
   print('server: ${client.currentServerAddress}');
-  print('access_token 前缀: ${_preview(token.accessToken)}');
-  print(
-    'refresh_token 前缀: ${token.refreshToken != null ? _preview(token.refreshToken!) : '(无)'}',
-  );
   print('过期时间: ${token.expiresAt}');
   print('是否即将过期: ${token.isExpired}');
 }
@@ -175,14 +166,4 @@ Future<bool> _tryOpenInBrowser(String url) async {
     stderr.writeln('打开浏览器失败: $e');
   }
   return false;
-}
-
-String _preview(String value, {int length = 12}) {
-  if (value.isEmpty) {
-    return '(空)';
-  }
-  if (value.length <= length) {
-    return value;
-  }
-  return '${value.substring(0, length)}...';
 }

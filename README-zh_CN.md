@@ -1,6 +1,6 @@
 # agentos_auth
 
-[English](README.md)
+[English](README.md) · [GitHub 仓库](https://github.com/agentos-org/agentos-auth)
 
 AgentOS OAuth2 认证 SDK，面向原生客户端，提供两种登录方式：
 
@@ -152,7 +152,7 @@ Future<void> main() async {
     return;
   }
 
-  final token = await client.loginWithOAuth(
+  await client.loginWithOAuth(
     serverAddress: serverAddress,
     openAuthorizationUrl: (url) async {
       if (Platform.isMacOS) {
@@ -165,7 +165,7 @@ Future<void> main() async {
     },
   );
 
-  print('登录成功: ${token.accessToken}');
+  print('登录成功');
 }
 ```
 
@@ -253,7 +253,7 @@ while (!session.isExpired) {
 
   switch (result.status) {
     case DeviceCodePollStatus.complete:
-      print('登录成功: ${result.token!.accessToken}');
+      print('登录成功');
       return;
     case DeviceCodePollStatus.pending:
       if (result.slowDown) {
